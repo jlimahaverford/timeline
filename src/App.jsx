@@ -69,7 +69,7 @@ const getSafeConfig = () => {
 
 const { firebaseConfig, appId, geminiKey } = getSafeConfig();
 
-// Initialize Firebase services outside the component
+// Initialize Firebase services outside the component to prevent re-initialization
 let auth, db;
 if (firebaseConfig && firebaseConfig.apiKey) {
   try {
@@ -105,11 +105,12 @@ export default function App() {
   useEffect(() => {
     if (!auth) return;
     const initAuth = async () => {
+      // Priority: Custom Token (Sandbox) -> Anonymous (Production)
       if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
         try {
           await signInWithCustomToken(auth, __initial_auth_token);
           return;
-        } catch (e) {}
+        } catch (e) { console.warn("Custom token login failed."); }
       } 
       try {
         if (!auth.currentUser) await signInAnonymously(auth);
@@ -129,7 +130,7 @@ export default function App() {
     const unsubscribe = onSnapshot(libraryCol, (snapshot) => {
       const timelines = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       setSavedTimelines(timelines.sort((a, b) => (b.updatedAt?.seconds || 0) - (a.updatedAt?.seconds || 0)));
-    }, (err) => console.error("Firestore error:", err));
+    }, (err) => console.error("Firestore sync error:", err));
     return () => unsubscribe();
   }, [user]);
 
@@ -189,9 +190,9 @@ export default function App() {
       const response = await fetch(fetchUrl);
       const csvText = await response.text();
       setEvents(parseCSV(csvText));
-      setStatusMessage('Data synced.');
+      setStatusMessage('Data synced successfully.');
       setTimeout(() => setStatusMessage(''), 3000);
-    } catch (err) { setError("Load failed. Ensure your Sheet is 'Anyone with link can view'."); }
+    } catch (err) { setError("Load failed. Ensure your Sheet is set to 'Anyone with link can view'."); }
     finally { setLoading(false); }
   };
 
@@ -199,14 +200,14 @@ export default function App() {
     if (!aiTopic || loading) return;
     const apiKey = geminiKey || "";
     if (!apiKey) {
-      setError("Gemini API Key missing (VITE_GEMINI_API_KEY).");
+      setError("Gemini API Key missing. Please set VITE_GEMINI_API_KEY.");
       return;
     }
     setLoading(true);
     setError('');
     setStatusMessage(`Researching "${aiTopic}"...`);
     const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
-    const prompt = `Create a historical timeline: "${aiTopic}". Exactly 35 events. Return JSON: { "events": [{ "date": "YYYY-MM-DD", "title": "string", "description": "string", "imageurl": "Wikimedia URL", "importance": 1-10 }] }`;
+    const prompt = `Generate a historical timeline for: "${aiTopic}". Include exactly 35 key events. Return JSON only: { "events": [{ "date": "YYYY-MM-DD", "title": "string", "description": "string", "imageurl": "Wikimedia file URL", "importance": 1-10 }] }`;
 
     const fetchWithRetry = async (attempt = 0) => {
       try {
@@ -224,7 +225,8 @@ export default function App() {
         return JSON.parse(text).events;
       } catch (err) {
         if (attempt < 5) {
-          await new Promise(r => setTimeout(r, Math.pow(2, attempt) * 1000));
+          const delay = Math.pow(2, attempt) * 1000;
+          await new Promise(r => setTimeout(r, delay));
           return fetchWithRetry(attempt + 1);
         }
         throw err;
@@ -236,7 +238,7 @@ export default function App() {
       setEvents(gen.map((e, idx) => ({ ...e, id: `ai-${idx}-${Date.now()}`, imageurl: optimizeImageUrl(e.imageurl) })));
       setStatusMessage("Map generated.");
       setTimeout(() => setStatusMessage(''), 3000);
-    } catch (err) { setError(`AI Error: ${err.message}`); }
+    } catch (err) { setError(`AI Generation failed: ${err.message}`); }
     finally { setLoading(false); }
   };
 
@@ -254,9 +256,9 @@ export default function App() {
       });
       setShowSaveDialog(false);
       setSaveName('');
-      setStatusMessage("Project archived.");
+      setStatusMessage("Project archived in cloud.");
       setTimeout(() => setStatusMessage(''), 3000);
-    } catch (err) { setError("Save failed. Check Firebase rules."); }
+    } catch (err) { setError("Save failed. Check Firebase Security Rules."); }
     finally { setLoading(false); }
   };
 
@@ -265,6 +267,13 @@ export default function App() {
     if (!db || !user) return;
     try { await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'timelines', id)); }
     catch (err) { setError("Delete failed."); }
+  };
+
+  const loadTimelineFromLibrary = (tl) => {
+    setEvents(tl.events);
+    setZoomLevel(tl.zoomLevel || 5);
+    setAiTopic(tl.topic || '');
+    setShowLibrary(false);
   };
 
   const visibleEvents = useMemo(() => 
@@ -279,7 +288,9 @@ export default function App() {
       if (lastYear !== null && year > lastYear) {
         const gap = year - lastYear;
         const step = gap > 100 ? 50 : (gap > 20 ? 10 : 1);
-        for (let y = lastYear + step; y < year; y += step) items.push({ type: 'marker', year: y, id: `m-${y}-${idx}` });
+        for (let y = lastYear + step; y < year; y += step) {
+          items.push({ type: 'marker', year: y, id: `m-${y}-${idx}` });
+        }
       }
       items.push({ type: 'event', data: event, id: event.id });
       lastYear = year;
@@ -307,8 +318,8 @@ export default function App() {
       <div className="h-screen bg-slate-50 flex flex-col items-center justify-center p-8 text-center">
         <div className="bg-white p-12 rounded-[3rem] shadow-2xl max-w-md border border-slate-100">
           <Settings size={64} className="mx-auto mb-6 text-amber-500 animate-spin-slow" />
-          <h2 className="text-3xl font-serif font-bold text-slate-900 mb-4">Configuration Required</h2>
-          <p className="text-slate-500 mb-8 leading-relaxed">Please add your Firebase Config to Vercel Environment Variables.</p>
+          <h2 className="text-3xl font-serif font-bold text-slate-900 mb-4">Setup Required</h2>
+          <p className="text-slate-500 mb-8 leading-relaxed">Please add your Firebase Configuration to Vercel's environment variables.</p>
         </div>
       </div>
     );
@@ -316,6 +327,7 @@ export default function App() {
 
   return (
     <div className="h-screen bg-[#fafaf9] text-slate-900 font-sans flex flex-col overflow-hidden selection:bg-blue-100">
+      
       <header className="bg-white/90 backdrop-blur-md border-b border-slate-200 px-6 py-4 z-50 shrink-0 shadow-sm">
         <div className="max-w-7xl mx-auto flex flex-col md:flex-row gap-4 items-center justify-between">
           <div className="flex items-center gap-4">
@@ -328,6 +340,7 @@ export default function App() {
               </div>
             </div>
           </div>
+
           <div className="flex items-center gap-2">
             <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-full mr-2 shadow-inner">
               <button onClick={() => setZoomLevel(Math.max(1, zoomLevel - 1))} className="p-1.5 hover:bg-white rounded-full transition-all text-slate-500"><ZoomOut size={16}/></button>
@@ -339,9 +352,10 @@ export default function App() {
             <button onClick={() => setShowSettings(!showSettings)} className={`p-2.5 rounded-full border transition-all ${showSettings ? 'bg-slate-900 text-white shadow-lg' : 'bg-white text-slate-600'}`}><Search size={18} /></button>
           </div>
         </div>
+
         {showSettings && (
           <div className="max-w-7xl mx-auto mt-6 grid grid-cols-1 lg:grid-cols-2 gap-4 animate-in slide-in-from-top-4">
-            <input type="text" placeholder="Sheet URL..." value={sheetUrl} onChange={(e)=>setSheetUrl(e.target.value)} onKeyDown={(e)=>e.key==='Enter'&&loadFromSheet(sheetUrl)} className="flex-1 px-4 py-3 bg-slate-50 border rounded-2xl text-sm font-mono outline-none shadow-inner"/>
+            <input type="text" placeholder="Sheet URL (CSV Mode)..." value={sheetUrl} onChange={(e)=>setSheetUrl(e.target.value)} onKeyDown={(e)=>e.key==='Enter'&&loadFromSheet(sheetUrl)} className="flex-1 px-4 py-3 bg-slate-50 border rounded-2xl text-sm font-mono outline-none shadow-inner"/>
             <div className="flex gap-2">
               <input type="text" placeholder="AI Research Topic..." value={aiTopic} onChange={(e)=>setAiTopic(e.target.value)} onKeyDown={(e)=>e.key==='Enter'&&handleAIGeneration()} className="flex-1 px-4 py-3 bg-blue-50/30 border border-blue-100 rounded-2xl text-sm outline-none shadow-inner"/>
               <button onClick={handleAIGeneration} disabled={loading} className="px-6 py-3 bg-blue-600 text-white rounded-2xl font-bold shadow-md active:scale-95 transition-all flex items-center gap-2">
@@ -350,6 +364,7 @@ export default function App() {
             </div>
           </div>
         )}
+
         {showLibrary && (
           <div className="max-w-7xl mx-auto mt-6 p-6 bg-slate-900 rounded-[2.5rem] shadow-2xl animate-in slide-in-from-top-4">
             <div className="flex justify-between items-center mb-6 px-2 text-white font-serif text-lg font-bold">
@@ -358,7 +373,7 @@ export default function App() {
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 max-h-[40vh] overflow-y-auto custom-scrollbar p-1">
               {savedTimelines.length === 0 ? (
-                <div className="col-span-full py-12 text-center text-slate-500 text-sm italic">Library is empty.</div>
+                <div className="col-span-full py-12 text-center text-slate-500 text-sm italic">Library is empty. Save a project to archive it here.</div>
               ) : savedTimelines.map(tl => (
                 <div key={tl.id} onClick={()=>loadTimelineFromLibrary(tl)} className="bg-slate-800 hover:bg-slate-700 p-5 rounded-2xl cursor-pointer transition-all border border-slate-700 group relative">
                   <div className="flex justify-between items-start mb-3">
@@ -374,13 +389,15 @@ export default function App() {
             </div>
           </div>
         )}
+
         {(error || statusMessage || loading) && (
           <div className="max-w-7xl mx-auto mt-4">
-            {error && <div className="text-sm text-red-600 flex items-center gap-2 bg-red-50 p-4 rounded-2xl border border-red-100">{String(error)}</div>}
-            {statusMessage && <div className="text-sm text-blue-700 flex items-center gap-2 bg-blue-50 p-4 rounded-2xl border border-blue-100 shadow-sm">{String(statusMessage)}</div>}
+            {error && <div className="text-sm text-red-600 flex items-center gap-2 bg-red-50 p-4 rounded-2xl border border-red-100 animate-in fade-in">{String(error)}</div>}
+            {statusMessage && <div className="text-sm text-blue-700 flex items-center gap-2 bg-blue-50 p-4 rounded-2xl border border-blue-100 shadow-sm animate-in fade-in">{String(statusMessage)}</div>}
           </div>
         )}
       </header>
+
       <main className="flex-1 relative overflow-hidden flex flex-col">
         <div className="absolute top-10 left-1/2 -translate-x-1/2 z-40 pointer-events-none">
           <div className="bg-slate-900/95 backdrop-blur-xl text-white px-10 py-3 rounded-full shadow-2xl flex items-center gap-4 border border-white/10">
@@ -388,6 +405,7 @@ export default function App() {
             <span className="font-serif font-black tracking-[0.2em] text-xl uppercase min-w-[160px] text-center">Narrative</span>
           </div>
         </div>
+
         <div ref={scrollContainerRef} className="flex-1 overflow-x-auto overflow-y-hidden custom-scrollbar snap-x snap-mandatory">
           <div className="h-full inline-flex items-end pb-32 px-[15vw] md:px-[35vw] min-w-full">
             <div className="flex items-end gap-16 relative">
@@ -400,7 +418,7 @@ export default function App() {
                   </div>
                 ) : (
                   <div key={item.id} className="relative flex flex-col items-center justify-end w-[320px] md:w-[420px] shrink-0 snap-center group">
-                    <div className="w-full bg-white rounded-[3rem] border border-slate-100 shadow-2xl transition-all duration-700 overflow-hidden flex flex-col mb-16 relative z-20 hover:-translate-y-8 hover:shadow-[0_40px_80px_rgba(0,0,0,0.1)]">
+                    <div className="w-full bg-white rounded-[3rem] border border-slate-100 shadow-2xl transition-all duration-700 overflow-hidden flex flex-col mb-16 relative z-20 hover:-translate-y-8 hover:shadow-[0_40px_80px_rgba(0,0,0,0.1)] transition-all">
                       <div className="h-48 md:h-64 overflow-hidden relative bg-slate-100 flex items-center justify-center">
                         <ImageWithFallback src={item.data.imageurl} alt={item.data.title} />
                       </div>
@@ -422,18 +440,21 @@ export default function App() {
           </div>
         </div>
       </main>
+
       {showSaveDialog && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/90 backdrop-blur-md p-6">
           <div className="bg-white rounded-[3.5rem] shadow-2xl max-w-lg w-full p-12 animate-in zoom-in-95">
             <h2 className="text-3xl font-serif font-bold text-slate-900 mb-4">Archive Project</h2>
+            <p className="text-slate-500 mb-10 leading-relaxed font-medium">Your work will be securely saved to your private cloud library.</p>
             <input autoFocus type="text" placeholder="Timeline Name..." value={saveName} onChange={(e)=>setSaveName(e.target.value)} onKeyDown={(e)=>e.key==='Enter'&&saveTimeline()} className="w-full px-8 py-5 bg-slate-50 border border-slate-200 rounded-[2rem] mb-10 text-xl font-medium focus:ring-4 focus:ring-blue-500/10 focus:outline-none transition-all shadow-inner" />
             <div className="flex gap-4">
               <button onClick={()=>setShowSaveDialog(false)} className="flex-1 py-5 text-slate-400 font-bold hover:bg-slate-50 rounded-[2rem] transition-all text-lg">Discard</button>
-              <button onClick={saveTimeline} disabled={!saveName.trim() || loading} className="flex-[2] py-5 bg-blue-600 text-white font-bold rounded-[2rem] shadow-2xl hover:bg-blue-700 disabled:opacity-50 transition-all text-lg">{loading ? 'Saving...' : 'Save to Cloud'}</button>
+              <button onClick={saveTimeline} disabled={!saveName.trim() || loading} className="flex-[2] py-5 bg-blue-600 text-white font-bold rounded-[2rem] shadow-2xl hover:bg-blue-700 disabled:opacity-50 transition-all text-lg">{loading ? 'Archiving...' : 'Save to Cloud'}</button>
             </div>
           </div>
         </div>
       )}
+
       <style dangerouslySetInnerHTML={{__html: `
         .custom-scrollbar::-webkit-scrollbar { height: 10px; background: transparent; }
         .custom-scrollbar::-webkit-scrollbar-thumb { background-color: #cbd5e1; border-radius: 30px; border: 3px solid #fafaf9; background-clip: content-box; }
