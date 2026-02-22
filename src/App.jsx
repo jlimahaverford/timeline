@@ -1,4 +1,3 @@
-import './index.css';
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { 
   ZoomIn, 
@@ -214,8 +213,7 @@ export default function App() {
     setError('');
     setStatusMessage(`Researching "${aiTopic}"...`);
 
-    // Environment-aware API configuration
-    // Use v1 for production to ensure wide model availability with standard API keys
+    // Use v1 for production (standard stable API) and v1beta for sandbox.
     const apiVersion = isSandbox ? "v1beta" : "v1";
     const model = isSandbox ? "gemini-2.5-flash-preview-09-2025" : "gemini-1.5-flash";
     const endpoint = `https://generativelanguage.googleapis.com/${apiVersion}/models/${model}:generateContent?key=${finalApiKey}`;
@@ -229,7 +227,10 @@ export default function App() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             contents: [{ parts: [{ text: prompt }] }],
-            generationConfig: { responseMimeType: "application/json" }
+            generationConfig: { 
+              // CRITICAL: Stable v1 endpoint requires snake_case field names for REST.
+              response_mime_type: "application/json" 
+            }
           })
         });
 
