@@ -213,21 +213,25 @@ export default function App() {
     const modelName = isSandbox ? 'gemini-2.5-flash-preview-09-2025' : 'gemini-1.5-flash';
     const endpoint = `https://generativelanguage.googleapis.com/${apiVersion}/models/${modelName}:generateContent?key=${apiKey}`;
     
-    // Restored the strict JSON prompt instructions as the primary enforcement mechanism
-    const prompt = `Generate a historical timeline for: "${aiTopic}". Include exactly 35 key events. Return JSON only: { "events": [{ "date": "YYYY-MM-DD", "title": "string", "description": "string", "imageurl": "Wikimedia file URL", "importance": 1-10 }] }`;
+    // Explicitly requesting raw JSON to avoid markdown blocks when generationConfig is omitted
+    const prompt = `Generate a historical timeline for: "${aiTopic}". Include exactly 35 key events. Return raw JSON only without any markdown formatting wrappers: { "events": [{ "date": "YYYY-MM-DD", "title": "string", "description": "string", "imageurl": "Wikimedia file URL", "importance": 1-10 }] }`;
 
     const fetchWithRetry = async (attempt = 0) => {
       try {
+        const payload = {
+          contents: [{ parts: [{ text: prompt }] }]
+        };
+
+        // Conditionally add generationConfig only for v1beta. 
+        // The v1 API can reject responseMimeType depending on strict payload schemas for older model routings.
+        if (apiVersion === 'v1beta') {
+          payload.generationConfig = { responseMimeType: "application/json" };
+        }
+
         const response = await fetch(endpoint, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: prompt }] }],
-            generationConfig: { 
-              responseMimeType: "application/json"
-              // Removed strict responseSchema to prevent 400 validation errors on v1 API
-            }
-          })
+          body: JSON.stringify(payload)
         });
         
         if (!response.ok) {
@@ -237,8 +241,15 @@ export default function App() {
         }
         
         const data = await response.json();
-        const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-        return JSON.parse(text).events;
+        let text = data.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
+
+        // Cleanup: If the model returned markdown formatting anyway (common when omitting responseMimeType), strip it before parsing.
+        if (text.includes('```')) {
+          text = text.replace(/```json/gi, '').replace(/```/g, '').trim();
+        }
+
+        const parsedData = JSON.parse(text);
+        return parsedData.events || [];
       } catch (err) {
         if (attempt < 5) {
           const delay = Math.pow(2, attempt) * 1000;
@@ -251,8 +262,12 @@ export default function App() {
 
     try {
       const gen = await fetchWithRetry();
-      setEvents(gen.map((e, idx) => ({ ...e, id: `ai-${idx}-${Date.now()}`, imageurl: optimizeImageUrl(e.imageurl) })));
-      setStatusMessage("Map generated.");
+      if (gen && gen.length > 0) {
+        setEvents(gen.map((e, idx) => ({ ...e, id: `ai-${idx}-${Date.now()}`, imageurl: optimizeImageUrl(e.imageurl) })));
+        setStatusMessage("Map generated.");
+      } else {
+        throw new Error("No events returned from API.");
+      }
       setTimeout(() => setStatusMessage(''), 3000);
     } catch (err) { setError(`AI Generation failed: ${err.message}`); }
     finally { setLoading(false); }
