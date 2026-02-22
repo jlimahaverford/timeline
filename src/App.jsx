@@ -199,7 +199,7 @@ export default function App() {
 
   const handleAIGeneration = async () => {
     if (!aiTopic || loading) return;
-    const apiKey = geminiKey || "";
+    const apiKey = (geminiKey || "").trim(); // Trim added to prevent malformed URL 404s
     if (!apiKey) {
       setError("Gemini API Key missing. Please set VITE_GEMINI_API_KEY.");
       return;
@@ -208,9 +208,10 @@ export default function App() {
     setError('');
     setStatusMessage(`Researching "${aiTopic}"...`);
     
-    // Dynamic Model Selection: Solves the Vercel vs Canvas mismatch
+    // Dynamic API & Model Selection: Using 'v1' stable API for Vercel production
+    const apiVersion = isSandbox ? 'v1beta' : 'v1';
     const modelName = isSandbox ? 'gemini-2.5-flash-preview-09-2025' : 'gemini-1.5-flash';
-    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
+    const endpoint = `https://generativelanguage.googleapis.com/${apiVersion}/models/${modelName}:generateContent?key=${apiKey}`;
     
     const prompt = `Generate a historical timeline for: "${aiTopic}". Include exactly 35 key events. Return JSON only: { "events": [{ "date": "YYYY-MM-DD", "title": "string", "description": "string", "imageurl": "Wikimedia file URL", "importance": 1-10 }] }`;
 
@@ -224,7 +225,10 @@ export default function App() {
             generationConfig: { responseMimeType: "application/json" }
           })
         });
-        if (!response.ok) throw new Error(`API Error: ${response.status}`);
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(`API Error: ${response.status} - ${errorText.substring(0, 50)}...`);
+        }
         const data = await response.json();
         const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
         return JSON.parse(text).events;
