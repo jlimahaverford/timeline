@@ -38,7 +38,8 @@ const getSafeConfig = () => {
   let config = {
     firebaseConfig: null,
     appId: "timeline-pro-production",
-    geminiKey: ""
+    geminiKey: "",
+    isSandbox: false
   };
 
   // 1. Sandbox Environment (Canvas)
@@ -46,6 +47,7 @@ const getSafeConfig = () => {
     try {
       config.firebaseConfig = typeof __firebase_config === 'string' ? JSON.parse(__firebase_config) : __firebase_config;
       config.appId = typeof __app_id !== 'undefined' ? __app_id : "timeline-pro-sandbox";
+      config.isSandbox = true;
     } catch (e) { console.error("Sandbox config parse error"); }
   }
 
@@ -68,7 +70,7 @@ const getSafeConfig = () => {
   return config;
 };
 
-const { firebaseConfig, appId, geminiKey } = getSafeConfig();
+const { firebaseConfig, appId, geminiKey, isSandbox } = getSafeConfig();
 
 // Initialize Firebase services outside the component to prevent re-initialization
 let auth, db;
@@ -198,15 +200,24 @@ export default function App() {
 
   const handleAIGeneration = async () => {
     if (!aiTopic || loading) return;
-    const apiKey = geminiKey || "";
-    if (!apiKey) {
-      setError("Gemini API Key missing. Please set VITE_GEMINI_API_KEY.");
+
+    // MANDATORY: apiKey must be set to "" for the sandbox to inject its own key.
+    const apiKey = ""; 
+    const finalApiKey = apiKey || geminiKey || "";
+    
+    if (!finalApiKey && !isSandbox) {
+      setError("API Key missing. Set VITE_GEMINI_API_KEY in your production environment.");
       return;
     }
+
     setLoading(true);
     setError('');
     setStatusMessage(`Researching "${aiTopic}"...`);
-    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
+
+    // In sandbox, use the mandatory preview model. In production, use standard 1.5-flash to avoid 404s.
+    const model = isSandbox ? "gemini-2.5-flash-preview-09-2025" : "gemini-1.5-flash";
+    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${finalApiKey}`;
+    
     const prompt = `Generate a historical timeline for: "${aiTopic}". Include exactly 35 key events. Return JSON only: { "events": [{ "date": "YYYY-MM-DD", "title": "string", "description": "string", "imageurl": "Wikimedia file URL", "importance": 1-10 }] }`;
 
     const fetchWithRetry = async (attempt = 0) => {
@@ -219,9 +230,16 @@ export default function App() {
             generationConfig: { responseMimeType: "application/json" }
           })
         });
-        if (!response.ok) throw new Error(`API Error: ${response.status}`);
+
+        if (!response.ok) {
+          const errData = await response.json().catch(() => ({}));
+          throw new Error(errData.error?.message || `API Error: ${response.status}`);
+        }
+
         const data = await response.json();
         const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (!text) throw new Error("No response content received.");
+        
         return JSON.parse(text).events;
       } catch (err) {
         if (attempt < 5) {
@@ -238,7 +256,9 @@ export default function App() {
       setEvents(gen.map((e, idx) => ({ ...e, id: `ai-${idx}-${Date.now()}`, imageurl: optimizeImageUrl(e.imageurl) })));
       setStatusMessage("Map generated.");
       setTimeout(() => setStatusMessage(''), 3000);
-    } catch (err) { setError(`AI Generation failed: ${err.message}`); }
+    } catch (err) { 
+      setError(`AI Research failed: ${err.message}`); 
+    }
     finally { setLoading(false); }
   };
 
@@ -406,14 +426,9 @@ export default function App() {
           </div>
         </div>
 
-        {/* Crucial Horizontal Layout Logic:
-           - flex-1 and overflow-x-auto on the parent.
-           - inline-flex and items-end on the content wrapper.
-           - whitespace-nowrap or flex-row inside items.
-        */}
         <div ref={scrollContainerRef} className="flex-1 overflow-x-auto overflow-y-hidden custom-scrollbar snap-x snap-mandatory">
           <div className="h-full inline-flex items-end pb-32 px-[15vw] md:px-[35vw] min-w-full">
-            <div className="flex items-end gap-16 relative">
+            <div className="flex itecams-end gap-16 relative">
               <div className="absolute bottom-0 left-[-3000px] right-[-3000px] h-1.5 bg-slate-200 z-0 opacity-50" />
               {layoutItems.map((item) => (
                 item.type === 'marker' ? (
