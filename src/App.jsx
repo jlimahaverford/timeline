@@ -38,15 +38,15 @@ const getSafeConfig = () => {
     firebaseConfig: null,
     appId: "timeline-pro-production",
     geminiKey: "",
-    isSandbox: false
+    isSandbox: false // Added to track environment
   };
 
   // 1. Sandbox Environment (Canvas)
   if (typeof __firebase_config !== 'undefined' && __firebase_config) {
+    config.isSandbox = true;
     try {
       config.firebaseConfig = typeof __firebase_config === 'string' ? JSON.parse(__firebase_config) : __firebase_config;
       config.appId = typeof __app_id !== 'undefined' ? __app_id : "timeline-pro-sandbox";
-      config.isSandbox = true;
     } catch (e) { console.error("Sandbox config parse error"); }
   }
 
@@ -199,74 +199,40 @@ export default function App() {
 
   const handleAIGeneration = async () => {
     if (!aiTopic || loading) return;
-
-    const apiKey = ""; 
-    const finalApiKey = apiKey || geminiKey || "";
-    
-    if (!finalApiKey && !isSandbox) {
-      setError("API Key missing. Set VITE_GEMINI_API_KEY in Vercel.");
+    const apiKey = geminiKey || "";
+    if (!apiKey) {
+      setError("Gemini API Key missing. Please set VITE_GEMINI_API_KEY.");
       return;
     }
-
     setLoading(true);
     setError('');
     setStatusMessage(`Researching "${aiTopic}"...`);
-
-    // Dynamic configuration to handle environment quirks
-    const apiVersion = "v1beta"; // Standardize on v1beta for better JSON support
-    const sandboxModel = "gemini-2.5-flash-preview-09-2025";
-    const prodModels = ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-pro"];
     
-    const fetchWithRetry = async (attempt = 0, modelIndex = 0) => {
-      const model = isSandbox ? sandboxModel : prodModels[modelIndex];
-      const endpoint = `https://generativelanguage.googleapis.com/${apiVersion}/models/${model}:generateContent?key=${finalApiKey}`;
-      
-      const prompt = `Create a historical timeline for: "${aiTopic}". Provide 35 significant events. Output strictly in JSON format: { "events": [{ "date": "YYYY-MM-DD", "title": "string", "description": "string", "imageurl": "Wikimedia URL", "importance": 1-10 }] }`;
+    // Dynamic Model Selection: Solves the Vercel vs Canvas mismatch
+    const modelName = isSandbox ? 'gemini-2.5-flash-preview-09-2025' : 'gemini-1.5-flash';
+    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
+    
+    const prompt = `Generate a historical timeline for: "${aiTopic}". Include exactly 35 key events. Return JSON only: { "events": [{ "date": "YYYY-MM-DD", "title": "string", "description": "string", "imageurl": "Wikimedia file URL", "importance": 1-10 }] }`;
 
+    const fetchWithRetry = async (attempt = 0) => {
       try {
-        const payload = {
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: {
-            // We use camelCase here; if the endpoint rejects it, the catch block will handle it.
-            responseMimeType: "application/json"
-          }
-        };
-
         const response = await fetch(endpoint, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: prompt }] }],
+            generationConfig: { responseMimeType: "application/json" }
+          })
         });
-
+        if (!response.ok) throw new Error(`API Error: ${response.status}`);
         const data = await response.json();
-
-        if (!response.ok) {
-          const message = data.error?.message || "";
-          // If model is not found, try the next fallback model in production
-          if (!isSandbox && message.includes("not found") && modelIndex < prodModels.length - 1) {
-            return fetchWithRetry(0, modelIndex + 1);
-          }
-          throw new Error(message || `HTTP ${response.status}`);
-        }
-
         const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-        if (!text) throw new Error("No response from AI");
-        
-        // Robust cleaning: remove markdown blocks if AI returned them despite JSON mode
-        const cleaned = text.replace(/^```json\s*/, '').replace(/```\s*$/, '').trim();
-        const parsed = JSON.parse(cleaned);
-        
-        if (!parsed.events || !Array.isArray(parsed.events)) {
-          throw new Error("Invalid format: 'events' array missing");
-        }
-
-        return parsed.events;
+        return JSON.parse(text).events;
       } catch (err) {
-        // Retry logic with exponential backoff for transient errors
-        if (attempt < 3) {
+        if (attempt < 5) {
           const delay = Math.pow(2, attempt) * 1000;
           await new Promise(r => setTimeout(r, delay));
-          return fetchWithRetry(attempt + 1, modelIndex);
+          return fetchWithRetry(attempt + 1);
         }
         throw err;
       }
@@ -277,9 +243,7 @@ export default function App() {
       setEvents(gen.map((e, idx) => ({ ...e, id: `ai-${idx}-${Date.now()}`, imageurl: optimizeImageUrl(e.imageurl) })));
       setStatusMessage("Map generated.");
       setTimeout(() => setStatusMessage(''), 3000);
-    } catch (err) { 
-      setError(`AI Research failed: ${err.message}`); 
-    }
+    } catch (err) { setError(`AI Generation failed: ${err.message}`); }
     finally { setLoading(false); }
   };
 
@@ -447,6 +411,11 @@ export default function App() {
           </div>
         </div>
 
+        {/* Crucial Horizontal Layout Logic:
+           - flex-1 and overflow-x-auto on the parent.
+           - inline-flex and items-end on the content wrapper.
+           - whitespace-nowrap or flex-row inside items.
+        */}
         <div ref={scrollContainerRef} className="flex-1 overflow-x-auto overflow-y-hidden custom-scrollbar snap-x snap-mandatory">
           <div className="h-full inline-flex items-end pb-32 px-[15vw] md:px-[35vw] min-w-full">
             <div className="flex items-end gap-16 relative">
