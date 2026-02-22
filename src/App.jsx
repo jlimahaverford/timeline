@@ -1,3 +1,4 @@
+import './index.css';
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { 
   ZoomIn, 
@@ -105,7 +106,6 @@ export default function App() {
   useEffect(() => {
     if (!auth) return;
     const initAuth = async () => {
-      // Priority: Custom Token (Sandbox) -> Anonymous (Production)
       if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
         try {
           await signInWithCustomToken(auth, __initial_auth_token);
@@ -318,15 +318,15 @@ export default function App() {
       <div className="h-screen bg-slate-50 flex flex-col items-center justify-center p-8 text-center">
         <div className="bg-white p-12 rounded-[3rem] shadow-2xl max-w-md border border-slate-100">
           <Settings size={64} className="mx-auto mb-6 text-amber-500 animate-spin-slow" />
-          <h2 className="text-3xl font-serif font-bold text-slate-900 mb-4">Setup Required</h2>
-          <p className="text-slate-500 mb-8 leading-relaxed">Please add your Firebase Configuration to Vercel's environment variables.</p>
+          <h2 className="text-3xl font-serif font-bold text-slate-900 mb-4 text-center">Setup Required</h2>
+          <p className="text-slate-500 mb-8 leading-relaxed text-center">Please add your Firebase Configuration to Vercel's environment variables.</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="h-screen bg-[#fafaf9] text-slate-900 font-sans flex flex-col overflow-hidden selection:bg-blue-100">
+    <div className="h-screen w-screen bg-[#fafaf9] text-slate-900 font-sans flex flex-col overflow-hidden selection:bg-blue-100">
       
       <header className="bg-white/90 backdrop-blur-md border-b border-slate-200 px-6 py-4 z-50 shrink-0 shadow-sm">
         <div className="max-w-7xl mx-auto flex flex-col md:flex-row gap-4 items-center justify-between">
@@ -406,6 +406,11 @@ export default function App() {
           </div>
         </div>
 
+        {/* Crucial Horizontal Layout Logic:
+           - flex-1 and overflow-x-auto on the parent.
+           - inline-flex and items-end on the content wrapper.
+           - whitespace-nowrap or flex-row inside items.
+        */}
         <div ref={scrollContainerRef} className="flex-1 overflow-x-auto overflow-y-hidden custom-scrollbar snap-x snap-mandatory">
           <div className="h-full inline-flex items-end pb-32 px-[15vw] md:px-[35vw] min-w-full">
             <div className="flex items-end gap-16 relative">
