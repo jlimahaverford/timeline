@@ -213,7 +213,8 @@ export default function App() {
     const modelName = isSandbox ? 'gemini-2.5-flash-preview-09-2025' : 'gemini-1.5-flash';
     const endpoint = `https://generativelanguage.googleapis.com/${apiVersion}/models/${modelName}:generateContent?key=${apiKey}`;
     
-    const prompt = `Generate a historical timeline for: "${aiTopic}". Include exactly 35 key events.`;
+    // Restored the strict JSON prompt instructions as the primary enforcement mechanism
+    const prompt = `Generate a historical timeline for: "${aiTopic}". Include exactly 35 key events. Return JSON only: { "events": [{ "date": "YYYY-MM-DD", "title": "string", "description": "string", "imageurl": "Wikimedia file URL", "importance": 1-10 }] }`;
 
     const fetchWithRetry = async (attempt = 0) => {
       try {
@@ -223,35 +224,16 @@ export default function App() {
           body: JSON.stringify({
             contents: [{ parts: [{ text: prompt }] }],
             generationConfig: { 
-              responseMimeType: "application/json",
-              // Providing the strict JSON schema prevents the 400 Bad Request API Error.
-              responseSchema: {
-                type: "OBJECT",
-                properties: {
-                  events: {
-                    type: "ARRAY",
-                    items: {
-                      type: "OBJECT",
-                      properties: {
-                        date: { type: "STRING" },
-                        title: { type: "STRING" },
-                        description: { type: "STRING" },
-                        imageurl: { type: "STRING" },
-                        importance: { type: "INTEGER" }
-                      },
-                      required: ["date", "title", "description", "imageurl", "importance"]
-                    }
-                  }
-                },
-                required: ["events"]
-              }
+              responseMimeType: "application/json"
+              // Removed strict responseSchema to prevent 400 validation errors on v1 API
             }
           })
         });
         
         if (!response.ok) {
           const errorText = await response.text();
-          throw new Error(`API Error: ${response.status} - ${errorText.substring(0, 50)}...`);
+          // Display up to 1000 characters of the error message for better debugging
+          throw new Error(`API Error: ${response.status} - ${errorText.substring(0, 1000)}`);
         }
         
         const data = await response.json();
