@@ -211,39 +211,26 @@ export default function App() {
     setError('');
     setStatusMessage(`Researching "${aiTopic}"...`);
     
-    // Unified API configuration: Using v1beta and the precise model across BOTH Dev and Prod
-    // This removes the branching logic and ensures total consistency.
-    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
-    const prompt = `Generate a historical timeline for: "${aiTopic}". Include exactly 35 key events.`;
+    // THE STABLE SOLUTION: 
+    // We *must* use the preview model in Canvas, and we *must* use the stable model in Vercel. 
+    // They cannot be the same string or one environment will throw a 404 error.
+    const modelName = isSandbox ? 'gemini-2.5-flash-preview-09-2025' : 'gemini-1.5-flash';
+    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
+    
+    const prompt = `Generate a historical timeline for: "${aiTopic}". Include exactly 35 key events. 
+    You MUST return ONLY valid JSON. Do not include markdown formatting or backticks.
+    Format exactly like this:
+    {
+      "events": [
+        { "date": "YYYY-MM-DD", "title": "string", "description": "string", "imageurl": "Wikimedia file URL", "importance": 10 }
+      ]
+    }`;
 
     const fetchWithRetry = async (attempt = 0) => {
       try {
+        // Ultra-stable, lowest-common-denominator payload. No generationConfig to cause 400 errors.
         const payload = {
-          contents: [{ parts: [{ text: prompt }] }],
-          // Because we are guaranteed to use v1beta, we can safely apply the robust structured output config
-          generationConfig: { 
-            responseMimeType: "application/json",
-            responseSchema: {
-              type: "OBJECT",
-              properties: {
-                events: {
-                  type: "ARRAY",
-                  items: {
-                    type: "OBJECT",
-                    properties: {
-                      date: { type: "STRING" },
-                      title: { type: "STRING" },
-                      description: { type: "STRING" },
-                      imageurl: { type: "STRING" },
-                      importance: { type: "INTEGER" }
-                    },
-                    required: ["date", "title", "description", "imageurl", "importance"]
-                  }
-                }
-              },
-              required: ["events"]
-            }
-          }
+          contents: [{ parts: [{ text: prompt }] }]
         };
 
         const response = await fetch(endpoint, {
@@ -254,16 +241,16 @@ export default function App() {
         
         if (!response.ok) {
           const errorText = await response.text();
-          // Display up to 1000 characters of the error message for full visibility
           throw new Error(`API Error: ${response.status} - ${errorText.substring(0, 1000)}`);
         }
         
         const data = await response.json();
         let text = data.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
 
-        // Minor cleanup just in case
-        if (text.includes('```')) {
-          text = text.replace(/```json/gi, '').replace(/```/g, '').trim();
+        // Extremely robust JSON extraction using regex, in case the model ignored our "no markdown" rule
+        const jsonMatch = text.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          text = jsonMatch[0];
         }
 
         const parsedData = JSON.parse(text);
@@ -281,14 +268,12 @@ export default function App() {
     try {
       const gen = await fetchWithRetry();
       if (gen && gen.length > 0) {
-        // Sort chronologically to prevent rendering bugs in the timeline track
         const sortedGen = gen.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-        
         setEvents(sortedGen.map((e, idx) => ({ 
           ...e, 
           id: `ai-${idx}-${Date.now()}`, 
           imageurl: optimizeImageUrl(e.imageurl),
-          importance: parseInt(e.importance, 10) || 5 // Ensure importance is a number
+          importance: parseInt(e.importance, 10) || 5 
         })));
         setStatusMessage("Timeline generated.");
       } else {
