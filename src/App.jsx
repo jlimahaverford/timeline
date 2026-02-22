@@ -213,8 +213,8 @@ export default function App() {
     setError('');
     setStatusMessage(`Researching "${aiTopic}"...`);
 
-    // Use v1 for production (standard stable API) and v1beta for sandbox.
-    const apiVersion = isSandbox ? "v1beta" : "v1";
+    // Unified API configuration using v1beta to ensure support for JSON mode via responseMimeType.
+    const apiVersion = "v1beta";
     const model = isSandbox ? "gemini-2.5-flash-preview-09-2025" : "gemini-1.5-flash";
     const endpoint = `https://generativelanguage.googleapis.com/${apiVersion}/models/${model}:generateContent?key=${finalApiKey}`;
     
@@ -228,8 +228,8 @@ export default function App() {
           body: JSON.stringify({
             contents: [{ parts: [{ text: prompt }] }],
             generationConfig: { 
-              // CRITICAL: Stable v1 endpoint requires snake_case field names for REST.
-              response_mime_type: "application/json" 
+              // Standard camelCase for the Google AI REST API.
+              responseMimeType: "application/json" 
             }
           })
         });
