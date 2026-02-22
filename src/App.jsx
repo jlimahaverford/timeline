@@ -211,11 +211,9 @@ export default function App() {
     setError('');
     setStatusMessage(`Researching "${aiTopic}"...`);
     
-    // THE STABLE SOLUTION: 
-    // We *must* use the preview model in Canvas, and we *must* use the stable model in Vercel. 
-    // They cannot be the same string or one environment will throw a 404 error.
-    const modelName = isSandbox ? 'gemini-2.5-flash-preview-09-2025' : 'gemini-1.5-flash';
-    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
+    // Using v1 and gemini-2.5-flash-lite universally as requested
+    const modelName = 'gemini-2.5-flash-lite';
+    const endpoint = `https://generativelanguage.googleapis.com/v1/models/${modelName}:generateContent?key=${apiKey}`;
     
     const prompt = `Generate a historical timeline for: "${aiTopic}". Include exactly 35 key events. 
     You MUST return ONLY valid JSON. Do not include markdown formatting or backticks.
