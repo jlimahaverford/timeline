@@ -200,12 +200,11 @@ export default function App() {
   const handleAIGeneration = async () => {
     if (!aiTopic || loading) return;
 
-    // MANDATORY: apiKey must be set to "" for the sandbox to inject its own key.
     const apiKey = ""; 
     const finalApiKey = apiKey || geminiKey || "";
     
     if (!finalApiKey && !isSandbox) {
-      setError("API Key missing. Set VITE_GEMINI_API_KEY in your production environment.");
+      setError("API Key missing. Set VITE_GEMINI_API_KEY in Vercel.");
       return;
     }
 
@@ -213,37 +212,45 @@ export default function App() {
     setError('');
     setStatusMessage(`Researching "${aiTopic}"...`);
 
-    // Unified API configuration using v1beta to ensure support for JSON mode via responseMimeType.
-    const apiVersion = "v1beta";
+    // Switch to stable v1 for production to fix model-not-found errors
+    const apiVersion = isSandbox ? "v1beta" : "v1";
     const model = isSandbox ? "gemini-2.5-flash-preview-09-2025" : "gemini-1.5-flash";
     const endpoint = `https://generativelanguage.googleapis.com/${apiVersion}/models/${model}:generateContent?key=${finalApiKey}`;
     
-    const prompt = `Generate a historical timeline for: "${aiTopic}". Include exactly 35 key events. Return JSON only: { "events": [{ "date": "YYYY-MM-DD", "title": "string", "description": "string", "imageurl": "Wikimedia file URL", "importance": 1-10 }] }`;
+    // Use a stronger prompt to ensure JSON if strict mode is disabled
+    const prompt = `Create a historical timeline for: "${aiTopic}". Include exactly 35 key events. Return strictly as a JSON object with this exact structure: { "events": [{ "date": "YYYY-MM-DD", "title": "string", "description": "string", "imageurl": "Wikimedia file URL", "importance": 1-10 }] }`;
 
     const fetchWithRetry = async (attempt = 0) => {
       try {
+        const payload = {
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: isSandbox ? { responseMimeType: "application/json" } : {}
+        };
+
         const response = await fetch(endpoint, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: prompt }] }],
-            generationConfig: { 
-              // Standard camelCase for the Google AI REST API.
-              responseMimeType: "application/json" 
-            }
-          })
+          body: JSON.stringify(payload)
         });
 
         if (!response.ok) {
           const errData = await response.json().catch(() => ({}));
-          throw new Error(errData.error?.message || `API Error: ${response.status}`);
+          throw new Error(errData.error?.message || `HTTP ${response.status}`);
         }
 
         const data = await response.json();
-        const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-        if (!text) throw new Error("No response content received.");
+        let text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (!text) throw new Error("Empty response from AI");
         
-        return JSON.parse(text).events;
+        // Robust JSON parsing: handle markdown code blocks if the AI includes them
+        const cleanedText = text.replace(/^```json\s*/, '').replace(/```\s*$/, '').trim();
+        const parsed = JSON.parse(cleanedText);
+        
+        if (!parsed.events || !Array.isArray(parsed.events)) {
+          throw new Error("Invalid response format: 'events' array missing");
+        }
+
+        return parsed.events;
       } catch (err) {
         if (attempt < 5) {
           const delay = Math.pow(2, attempt) * 1000;
