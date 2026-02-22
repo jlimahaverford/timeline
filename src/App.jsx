@@ -212,19 +212,24 @@ export default function App() {
     setError('');
     setStatusMessage(`Researching "${aiTopic}"...`);
 
-    // Switch to stable v1 for production to fix model-not-found errors
-    const apiVersion = isSandbox ? "v1beta" : "v1";
-    const model = isSandbox ? "gemini-2.5-flash-preview-09-2025" : "gemini-1.5-flash";
-    const endpoint = `https://generativelanguage.googleapis.com/${apiVersion}/models/${model}:generateContent?key=${finalApiKey}`;
+    // Dynamic configuration to handle environment quirks
+    const apiVersion = "v1beta"; // Standardize on v1beta for better JSON support
+    const sandboxModel = "gemini-2.5-flash-preview-09-2025";
+    const prodModels = ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-pro"];
     
-    // Use a stronger prompt to ensure JSON if strict mode is disabled
-    const prompt = `Create a historical timeline for: "${aiTopic}". Include exactly 35 key events. Return strictly as a JSON object with this exact structure: { "events": [{ "date": "YYYY-MM-DD", "title": "string", "description": "string", "imageurl": "Wikimedia file URL", "importance": 1-10 }] }`;
+    const fetchWithRetry = async (attempt = 0, modelIndex = 0) => {
+      const model = isSandbox ? sandboxModel : prodModels[modelIndex];
+      const endpoint = `https://generativelanguage.googleapis.com/${apiVersion}/models/${model}:generateContent?key=${finalApiKey}`;
+      
+      const prompt = `Create a historical timeline for: "${aiTopic}". Provide 35 significant events. Output strictly in JSON format: { "events": [{ "date": "YYYY-MM-DD", "title": "string", "description": "string", "imageurl": "Wikimedia URL", "importance": 1-10 }] }`;
 
-    const fetchWithRetry = async (attempt = 0) => {
       try {
         const payload = {
           contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: isSandbox ? { responseMimeType: "application/json" } : {}
+          generationConfig: {
+            // We use camelCase here; if the endpoint rejects it, the catch block will handle it.
+            responseMimeType: "application/json"
+          }
         };
 
         const response = await fetch(endpoint, {
@@ -233,29 +238,35 @@ export default function App() {
           body: JSON.stringify(payload)
         });
 
+        const data = await response.json();
+
         if (!response.ok) {
-          const errData = await response.json().catch(() => ({}));
-          throw new Error(errData.error?.message || `HTTP ${response.status}`);
+          const message = data.error?.message || "";
+          // If model is not found, try the next fallback model in production
+          if (!isSandbox && message.includes("not found") && modelIndex < prodModels.length - 1) {
+            return fetchWithRetry(0, modelIndex + 1);
+          }
+          throw new Error(message || `HTTP ${response.status}`);
         }
 
-        const data = await response.json();
-        let text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-        if (!text) throw new Error("Empty response from AI");
+        const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (!text) throw new Error("No response from AI");
         
-        // Robust JSON parsing: handle markdown code blocks if the AI includes them
-        const cleanedText = text.replace(/^```json\s*/, '').replace(/```\s*$/, '').trim();
-        const parsed = JSON.parse(cleanedText);
+        // Robust cleaning: remove markdown blocks if AI returned them despite JSON mode
+        const cleaned = text.replace(/^```json\s*/, '').replace(/```\s*$/, '').trim();
+        const parsed = JSON.parse(cleaned);
         
         if (!parsed.events || !Array.isArray(parsed.events)) {
-          throw new Error("Invalid response format: 'events' array missing");
+          throw new Error("Invalid format: 'events' array missing");
         }
 
         return parsed.events;
       } catch (err) {
-        if (attempt < 5) {
+        // Retry logic with exponential backoff for transient errors
+        if (attempt < 3) {
           const delay = Math.pow(2, attempt) * 1000;
           await new Promise(r => setTimeout(r, delay));
-          return fetchWithRetry(attempt + 1);
+          return fetchWithRetry(attempt + 1, modelIndex);
         }
         throw err;
       }
