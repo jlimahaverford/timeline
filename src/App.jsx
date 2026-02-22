@@ -38,7 +38,7 @@ const getSafeConfig = () => {
     firebaseConfig: null,
     appId: "timeline-pro-production",
     geminiKey: "",
-    isSandbox: false // Added to track environment
+    isSandbox: false
   };
 
   // 1. Sandbox Environment (Canvas)
@@ -86,7 +86,7 @@ const DEFAULT_SHEET_URL = "https://docs.google.com/spreadsheets/d/1PUuaIAelViebA
 export default function App() {
   const [user, setUser] = useState(null);
   const [events, setEvents] = useState([]);
-  const [zoomLevel, setZoomLevel] = useState(5); 
+  const [zoomLevel, setZoomLevel] = useState(10); 
   const [sheetUrl, setSheetUrl] = useState(DEFAULT_SHEET_URL);
   const [aiTopic, setAiTopic] = useState('');
   const [loading, setLoading] = useState(false);
@@ -200,33 +200,51 @@ export default function App() {
   const handleAIGeneration = async () => {
     if (!aiTopic || loading) return;
     const apiKey = (geminiKey || "").trim();
-    if (!apiKey) {
+    
+    // Canvas injects the key automatically at runtime, so we only validate for Vercel Prod
+    if (!isSandbox && !apiKey) {
       setError("Gemini API Key missing. Please set VITE_GEMINI_API_KEY.");
       return;
     }
+    
     setLoading(true);
     setError('');
     setStatusMessage(`Researching "${aiTopic}"...`);
     
-    // Use v1beta for Canvas preview models, and v1 for stable production models
-    const apiVersion = isSandbox ? 'v1beta' : 'v1';
-    const modelName = isSandbox ? 'gemini-2.5-flash-preview-09-2025' : 'gemini-1.5-flash';
-    const endpoint = `https://generativelanguage.googleapis.com/${apiVersion}/models/${modelName}:generateContent?key=${apiKey}`;
-    
-    // Explicitly requesting raw JSON to avoid markdown blocks when generationConfig is omitted
-    const prompt = `Generate a historical timeline for: "${aiTopic}". Include exactly 35 key events. Return raw JSON only without any markdown formatting wrappers: { "events": [{ "date": "YYYY-MM-DD", "title": "string", "description": "string", "imageurl": "Wikimedia file URL", "importance": 1-10 }] }`;
+    // Unified API configuration: Using v1beta and the precise model across BOTH Dev and Prod
+    // This removes the branching logic and ensures total consistency.
+    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
+    const prompt = `Generate a historical timeline for: "${aiTopic}". Include exactly 35 key events.`;
 
     const fetchWithRetry = async (attempt = 0) => {
       try {
         const payload = {
-          contents: [{ parts: [{ text: prompt }] }]
+          contents: [{ parts: [{ text: prompt }] }],
+          // Because we are guaranteed to use v1beta, we can safely apply the robust structured output config
+          generationConfig: { 
+            responseMimeType: "application/json",
+            responseSchema: {
+              type: "OBJECT",
+              properties: {
+                events: {
+                  type: "ARRAY",
+                  items: {
+                    type: "OBJECT",
+                    properties: {
+                      date: { type: "STRING" },
+                      title: { type: "STRING" },
+                      description: { type: "STRING" },
+                      imageurl: { type: "STRING" },
+                      importance: { type: "INTEGER" }
+                    },
+                    required: ["date", "title", "description", "imageurl", "importance"]
+                  }
+                }
+              },
+              required: ["events"]
+            }
+          }
         };
-
-        // Conditionally add generationConfig only for v1beta. 
-        // The v1 API can reject responseMimeType depending on strict payload schemas for older model routings.
-        if (apiVersion === 'v1beta') {
-          payload.generationConfig = { responseMimeType: "application/json" };
-        }
 
         const response = await fetch(endpoint, {
           method: 'POST',
@@ -236,14 +254,14 @@ export default function App() {
         
         if (!response.ok) {
           const errorText = await response.text();
-          // Display up to 1000 characters of the error message for better debugging
+          // Display up to 1000 characters of the error message for full visibility
           throw new Error(`API Error: ${response.status} - ${errorText.substring(0, 1000)}`);
         }
         
         const data = await response.json();
         let text = data.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
 
-        // Cleanup: If the model returned markdown formatting anyway (common when omitting responseMimeType), strip it before parsing.
+        // Minor cleanup just in case
         if (text.includes('```')) {
           text = text.replace(/```json/gi, '').replace(/```/g, '').trim();
         }
@@ -263,8 +281,16 @@ export default function App() {
     try {
       const gen = await fetchWithRetry();
       if (gen && gen.length > 0) {
-        setEvents(gen.map((e, idx) => ({ ...e, id: `ai-${idx}-${Date.now()}`, imageurl: optimizeImageUrl(e.imageurl) })));
-        setStatusMessage("Map generated.");
+        // Sort chronologically to prevent rendering bugs in the timeline track
+        const sortedGen = gen.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+        
+        setEvents(sortedGen.map((e, idx) => ({ 
+          ...e, 
+          id: `ai-${idx}-${Date.now()}`, 
+          imageurl: optimizeImageUrl(e.imageurl),
+          importance: parseInt(e.importance, 10) || 5 // Ensure importance is a number
+        })));
+        setStatusMessage("Timeline generated.");
       } else {
         throw new Error("No events returned from API.");
       }
@@ -302,13 +328,13 @@ export default function App() {
 
   const loadTimelineFromLibrary = (tl) => {
     setEvents(tl.events);
-    setZoomLevel(tl.zoomLevel || 5);
+    setZoomLevel(tl.zoomLevel || 10);
     setAiTopic(tl.topic || '');
     setShowLibrary(false);
   };
 
   const visibleEvents = useMemo(() => 
-    events.filter(e => (e.importance || 1) >= (11 - zoomLevel)), 
+    events.filter(e => (parseInt(e.importance, 10) || 1) >= (11 - zoomLevel)), 
   [events, zoomLevel]);
 
   const layoutItems = useMemo(() => {
