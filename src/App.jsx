@@ -208,9 +208,10 @@ export default function App() {
     setError('');
     setStatusMessage(`Researching "${aiTopic}"...`);
     
-    // Use the v1beta endpoint universally. It is perfectly stable and required for full JSON Schema support.
+    // Use v1beta for Canvas preview models, and v1 for stable production models
+    const apiVersion = isSandbox ? 'v1beta' : 'v1';
     const modelName = isSandbox ? 'gemini-2.5-flash-preview-09-2025' : 'gemini-1.5-flash';
-    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
+    const endpoint = `https://generativelanguage.googleapis.com/${apiVersion}/models/${modelName}:generateContent?key=${apiKey}`;
     
     const prompt = `Generate a historical timeline for: "${aiTopic}". Include exactly 35 key events.`;
 
