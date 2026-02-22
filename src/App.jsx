@@ -214,9 +214,11 @@ export default function App() {
     setError('');
     setStatusMessage(`Researching "${aiTopic}"...`);
 
-    // In sandbox, use the mandatory preview model. In production, use standard 1.5-flash to avoid 404s.
+    // Environment-aware API configuration
+    // Use v1 for production to ensure wide model availability with standard API keys
+    const apiVersion = isSandbox ? "v1beta" : "v1";
     const model = isSandbox ? "gemini-2.5-flash-preview-09-2025" : "gemini-1.5-flash";
-    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${finalApiKey}`;
+    const endpoint = `https://generativelanguage.googleapis.com/${apiVersion}/models/${model}:generateContent?key=${finalApiKey}`;
     
     const prompt = `Generate a historical timeline for: "${aiTopic}". Include exactly 35 key events. Return JSON only: { "events": [{ "date": "YYYY-MM-DD", "title": "string", "description": "string", "imageurl": "Wikimedia file URL", "importance": 1-10 }] }`;
 
@@ -428,7 +430,7 @@ export default function App() {
 
         <div ref={scrollContainerRef} className="flex-1 overflow-x-auto overflow-y-hidden custom-scrollbar snap-x snap-mandatory">
           <div className="h-full inline-flex items-end pb-32 px-[15vw] md:px-[35vw] min-w-full">
-            <div className="flex itecams-end gap-16 relative">
+            <div className="flex items-end gap-16 relative">
               <div className="absolute bottom-0 left-[-3000px] right-[-3000px] h-1.5 bg-slate-200 z-0 opacity-50" />
               {layoutItems.map((item) => (
                 item.type === 'marker' ? (
