@@ -211,9 +211,11 @@ export default function App() {
     setError('');
     setStatusMessage(`Researching "${aiTopic}"...`);
     
-    // Using v1 and gemini-2.5-flash-lite universally as requested
-    const modelName = 'gemini-2.5-flash-lite';
-    const endpoint = `https://generativelanguage.googleapis.com/v1/models/${modelName}:generateContent?key=${apiKey}`;
+    // Branching the endpoint: Canvas requires the preview model to bypass API key validation, 
+    // but Prod stays completely locked to your stable v1 flash-lite choice!
+    const apiVersion = isSandbox ? 'v1beta' : 'v1';
+    const modelName = isSandbox ? 'gemini-2.5-flash-preview-09-2025' : 'gemini-2.5-flash-lite';
+    const endpoint = `https://generativelanguage.googleapis.com/${apiVersion}/models/${modelName}:generateContent?key=${apiKey}`;
     
     const prompt = `Generate a historical timeline for: "${aiTopic}". Include exactly 35 key events. 
     You MUST return ONLY valid JSON. Do not include markdown formatting or backticks.
