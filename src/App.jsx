@@ -116,6 +116,7 @@ export default function App() {
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [showZoomSlider, setShowZoomSlider] = useState(false);
   const [savedTimelines, setSavedTimelines] = useState([]);
+  const [activeEventDetails, setActiveEventDetails] = useState(null);
   
   // Input Temp States
   const [newTitle, setNewTitle] = useState('');
@@ -124,6 +125,8 @@ export default function App() {
   const [sheetUrl, setSheetUrl] = useState('');
 
   const scrollContainerRef = useRef(null);
+
+  const isTimelineInactive = !timelineTitle && events.length === 0;
 
   // Auth Initialization
   useEffect(() => {
@@ -327,7 +330,7 @@ export default function App() {
             </div>
           </div>
 
-          {/* Controls: Plus, Folder, |, Disk, Star, Zoom */}
+          {/* Controls: Plus, Folder, |, Star, Disk, Zoom */}
           <div className="flex items-center gap-1 shrink-0">
             <button onClick={() => setShowNewDialog(true)} className="p-2 rounded-xl hover:bg-slate-100 text-slate-600 transition-colors" title="New Timeline">
               <Plus size={20} />
@@ -338,13 +341,28 @@ export default function App() {
             
             <div className="h-6 w-[1px] bg-slate-200 mx-2" />
 
-            <button onClick={handleSave} className="p-2 rounded-xl hover:bg-slate-100 text-slate-600 transition-colors" title="Save Timeline">
-              <Save size={20} />
-            </button>
-            <button onClick={() => setShowAddDialog(true)} className="p-2 rounded-xl text-blue-600 hover:bg-blue-50 transition-colors" title="Add Events">
+            <button 
+              disabled={isTimelineInactive}
+              onClick={() => setShowAddDialog(true)} 
+              className={`p-2 rounded-xl transition-colors ${isTimelineInactive ? 'opacity-30 cursor-not-allowed text-slate-400' : 'text-blue-600 hover:bg-blue-50'}`} 
+              title="Add Events"
+            >
               <StarIcon size={20} />
             </button>
-            <button onClick={() => setShowZoomSlider(!showZoomSlider)} className={`p-2 rounded-xl transition-colors ${showZoomSlider ? 'bg-slate-900 text-white' : 'hover:bg-slate-100 text-slate-600'}`} title="Zoom Controls">
+            <button 
+              disabled={isTimelineInactive}
+              onClick={handleSave} 
+              className={`p-2 rounded-xl transition-colors ${isTimelineInactive ? 'opacity-30 cursor-not-allowed text-slate-400' : 'hover:bg-slate-100 text-slate-600'}`} 
+              title="Save Timeline"
+            >
+              <Save size={20} />
+            </button>
+            <button 
+              disabled={isTimelineInactive}
+              onClick={() => setShowZoomSlider(!showZoomSlider)} 
+              className={`p-2 rounded-xl transition-colors ${isTimelineInactive ? 'opacity-30 cursor-not-allowed text-slate-400' : (showZoomSlider ? 'bg-slate-900 text-white' : 'hover:bg-slate-100 text-slate-600')}`} 
+              title="Zoom Controls"
+            >
               <ZoomIn size={20} />
             </button>
           </div>
@@ -396,12 +414,7 @@ export default function App() {
             <div className="flex items-end gap-16 relative">
               <div className="absolute bottom-0 left-[-5000px] right-[-5000px] h-1.5 bg-slate-200 z-0 opacity-40" />
               
-              {visibleEvents.length === 0 ? (
-                <div className="w-[30vw] flex flex-col items-center justify-center text-slate-300 gap-4 opacity-50">
-                  <StarIcon size={48} />
-                  <p className="font-serif italic text-lg text-center">Your timeline is blank. Click the star to populate it.</p>
-                </div>
-              ) : visibleEvents.map((evt) => (
+              {visibleEvents.map((evt) => (
                 <div key={evt.id} className="relative flex flex-col items-center justify-end w-[320px] md:w-[400px] shrink-0 snap-center group">
                   <div className="w-full bg-white rounded-[2.5rem] border border-slate-100 shadow-xl transition-all duration-700 overflow-hidden flex flex-col mb-16 relative z-20 group-hover:-translate-y-8 group-hover:shadow-2xl">
                     <div className="h-44 md:h-56 overflow-hidden relative bg-slate-50 flex items-center justify-center">
@@ -415,7 +428,14 @@ export default function App() {
                         <span className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 bg-slate-50 px-3 py-1.5 rounded-full border border-slate-100">
                           {new Date(evt.date).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })}
                         </span>
-                        <button onClick={() => setEvents(calculateRelativeImportance(events.filter(e => e.id !== evt.id)))} className="p-1.5 text-slate-300 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100"><Trash2 size={14}/></button>
+                        <div className="flex gap-1 items-center">
+                          <button onClick={() => setActiveEventDetails(evt)} className="p-1.5 text-slate-300 hover:text-blue-500 transition-colors opacity-0 group-hover:opacity-100" title="Information">
+                            <Info size={14}/>
+                          </button>
+                          <button onClick={() => setEvents(calculateRelativeImportance(events.filter(e => e.id !== evt.id)))} className="p-1.5 text-slate-300 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100" title="Delete">
+                            <Trash2 size={14}/>
+                          </button>
+                        </div>
                       </div>
                       <h3 className="font-serif font-bold text-xl md:text-2xl text-slate-900 leading-[1.2] mb-3 group-hover:text-blue-600 transition-colors line-clamp-2">{evt.title}</h3>
                       <p className="text-sm text-slate-500 leading-relaxed line-clamp-4 font-medium italic">"{evt.description}"</p>
@@ -432,6 +452,47 @@ export default function App() {
 
       {/* MODALS */}
       
+      {/* Event Details Modal */}
+      {activeEventDetails && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-6">
+          <div className="bg-white rounded-[2.5rem] shadow-2xl max-w-lg w-full p-10 animate-in zoom-in-95">
+             <div className="flex justify-between items-center mb-6">
+               <h2 className="text-2xl font-serif font-bold text-slate-900">Event Properties</h2>
+               <button onClick={() => setActiveEventDetails(null)} className="p-2 hover:bg-slate-100 rounded-full"><X size={20}/></button>
+             </div>
+             <div className="space-y-4 text-sm font-medium text-slate-700 overflow-y-auto max-h-[60vh] pr-2 custom-scrollbar">
+               <div className="p-4 bg-slate-50 rounded-2xl">
+                 <p className="text-[10px] text-slate-400 uppercase font-black tracking-widest mb-1">Title</p>
+                 <p>{activeEventDetails.title}</p>
+               </div>
+               <div className="p-4 bg-slate-50 rounded-2xl">
+                 <p className="text-[10px] text-slate-400 uppercase font-black tracking-widest mb-1">Date</p>
+                 <p>{activeEventDetails.date}</p>
+               </div>
+               <div className="p-4 bg-slate-50 rounded-2xl">
+                 <p className="text-[10px] text-slate-400 uppercase font-black tracking-widest mb-1">Description</p>
+                 <p className="italic">"{activeEventDetails.description}"</p>
+               </div>
+               <div className="grid grid-cols-2 gap-4">
+                 <div className="p-4 bg-slate-50 rounded-2xl">
+                   <p className="text-[10px] text-slate-400 uppercase font-black tracking-widest mb-1">Absolute Imp.</p>
+                   <p>{activeEventDetails.absoluteImportance}</p>
+                 </div>
+                 <div className="p-4 bg-slate-50 rounded-2xl">
+                   <p className="text-[10px] text-slate-400 uppercase font-black tracking-widest mb-1">Relative Tier</p>
+                   <p>{activeEventDetails.relativeImportance}</p>
+                 </div>
+               </div>
+               <div className="p-4 bg-slate-50 rounded-2xl">
+                 <p className="text-[10px] text-slate-400 uppercase font-black tracking-widest mb-1">Image URL</p>
+                 <p className="break-all font-mono text-[10px] text-blue-600">{activeEventDetails.imageurl}</p>
+               </div>
+             </div>
+             <button onClick={() => setActiveEventDetails(null)} className="mt-8 w-full py-4 bg-slate-900 text-white font-bold rounded-2xl shadow-lg">Close View</button>
+          </div>
+        </div>
+      )}
+
       {/* New Timeline Modal */}
       {showNewDialog && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-6">
