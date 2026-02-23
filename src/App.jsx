@@ -157,6 +157,7 @@ export default function App() {
    * WIKIPEDIA IMAGE FETCHER
    */
   const fetchWikiImage = async (title) => {
+    if (!title) return '';
     try {
       const url = `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title)}`;
       const response = await fetch(url);
@@ -167,6 +168,19 @@ export default function App() {
       console.warn(`Wiki image fetch failed for: ${title}`);
       return '';
     }
+  };
+
+  /**
+   * IMAGE SEARCH FALLBACK ENGINE
+   * Tries the primary title, then cycles through alternative search terms until an image is found.
+   */
+  const getImageWithFallback = async (mainTitle, altTerms = []) => {
+    const termsToTry = [mainTitle, ...altTerms].filter(Boolean);
+    for (const term of termsToTry) {
+      const img = await fetchWikiImage(term);
+      if (img) return img;
+    }
+    return '';
   };
 
   /**
@@ -213,14 +227,26 @@ export default function App() {
     Currently, the timeline includes: [${existingTitles}].
     
     Task: Identify ${numToAdd} NEW, UNIQUE key events relevant to this scope. 
-    Focus on events that would have a Wikipedia page.
-    For each event, assign an "absoluteImportance" (1-100) based on its global historical impact.
+    
+    CRITICAL INSTRUCTION FOR TITLES:
+    Each title MUST represent a specific EVENT or action (e.g., "The Weavers' 'Goodnight Irene' Tops Charts") rather than just a proper noun or entity (e.g., "The Weavers").
+    Titles must be concise, ideally 40 characters or shorter.
+    
+    For each event, provide 3 "altSearchTerms". These should be broader keywords or the primary proper nouns associated with the event that are likely to have high-quality Wikipedia entries with images.
+    
+    Assign an "absoluteImportance" (1-100) based on its global historical impact.
     
     Return ONLY valid JSON.
     Format:
     {
       "events": [
-        { "date": "YYYY-MM-DD", "title": "Wikipedia Page Title", "description": "Compelling summary", "absoluteImportance": 85 }
+        { 
+          "date": "YYYY-MM-DD", 
+          "title": "Specific Concise Event", 
+          "description": "Compelling historical summary", 
+          "absoluteImportance": 85,
+          "altSearchTerms": ["Broad Entity Name", "Related Major Event", "Subject Category"]
+        }
       ]
     }`;
 
@@ -239,9 +265,9 @@ export default function App() {
 
       setStatusMessage(`Sourcing historical imagery...`);
       
-      // Fetch images for each new event using the Wikipedia API
+      // Fetch images for each new event using the Fallback logic
       const eventsWithImages = await Promise.all(newRawEvents.map(async (e, idx) => {
-        const imageUrl = await fetchWikiImage(e.title);
+        const imageUrl = await getImageWithFallback(e.title, e.altSearchTerms);
         return {
           ...e,
           id: `ai-${idx}-${Date.now()}`,
