@@ -56,7 +56,7 @@ const TimelineLogo = ({ size = 36 }) => (
 );
 
 /**
- * CURVED FOUR POINTED STAR ICON (Diamond replacement)
+ * CURVED FOUR POINTED STAR ICON
  */
 const StarIcon = ({ size = 18 }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -99,6 +99,33 @@ if (firebaseConfig && firebaseConfig.apiKey) {
     db = getFirestore(app);
   } catch (e) { console.error("Firebase Init Error:", e); }
 }
+
+/**
+ * DATE UTILITIES
+ */
+const parseDateForSorting = (dateStr) => {
+  if (!dateStr) return 0;
+  const s = String(dateStr).trim();
+  // Handle simple Year (e.g. "1931")
+  if (/^\d{1,4}$/.test(s)) {
+    return new Date(`${s}-01-01`).getTime();
+  }
+  // Handle ISO or common formats
+  const parsed = new Date(s).getTime();
+  return isNaN(parsed) ? 0 : parsed;
+};
+
+const formatDisplayDate = (dateStr) => {
+  if (!dateStr) return '';
+  const s = String(dateStr).trim();
+  // If it's just a year, return as is
+  if (/^\d{1,4}$/.test(s)) return s;
+  
+  // Otherwise format nicely
+  const d = new Date(s);
+  if (isNaN(d.getTime())) return s;
+  return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+};
 
 export default function App() {
   const [user, setUser] = useState(null);
@@ -172,7 +199,6 @@ export default function App() {
 
   /**
    * IMAGE SEARCH FALLBACK ENGINE
-   * Tries the primary title, then cycles through alternative search terms until an image is found.
    */
   const getImageWithFallback = async (mainTitle, altTerms = []) => {
     const termsToTry = [mainTitle, ...altTerms].filter(Boolean);
@@ -188,14 +214,19 @@ export default function App() {
    */
   const calculateRelativeImportance = (rawEvents) => {
     if (rawEvents.length === 0) return [];
+    
     // Sort by absolute importance (assigned by AI)
-    const sorted = [...rawEvents].sort((a, b) => (a.absoluteImportance || 0) - (b.absoluteImportance || 0));
-    const total = sorted.length;
-    // Map to relative Tiers 1-10
-    return sorted.map((evt, idx) => {
+    const sortedByImportance = [...rawEvents].sort((a, b) => (a.absoluteImportance || 0) - (b.absoluteImportance || 0));
+    const total = sortedByImportance.length;
+    
+    // Assign tiers based on percentile of importance
+    const tieredEvents = sortedByImportance.map((evt, idx) => {
       const level = Math.min(10, Math.ceil(((idx + 1) / total) * 10));
       return { ...evt, relativeImportance: level };
-    }).sort((a, b) => new Date(a.date) - new Date(b.date));
+    });
+
+    // Final Sort: Order by Chronology (Start Date)
+    return tieredEvents.sort((a, b) => parseDateForSorting(a.startDate) - parseDateForSorting(b.startDate));
   };
 
   const handleCreateNew = () => {
@@ -229,23 +260,29 @@ export default function App() {
     Task: Identify ${numToAdd} NEW, UNIQUE key events relevant to this scope. 
     
     CRITICAL INSTRUCTION FOR TITLES:
-    Each title MUST represent a specific EVENT or action (e.g., "The Weavers' 'Goodnight Irene' Tops Charts") rather than just a proper noun or entity (e.g., "The Weavers").
+    Each title MUST represent a specific EVENT or action (e.g., "The Weavers' 'Goodnight Irene' Tops Charts") rather than just a proper noun.
     Titles must be concise, ideally 40 characters or shorter.
     
-    For each event, provide 3 "altSearchTerms". These should be broader keywords or the primary proper nouns associated with the event that are likely to have high-quality Wikipedia entries with images.
+    CRITICAL INSTRUCTION FOR DATES:
+    Events often span time. Return a "startDate" and an optional "endDate". 
+    Dates can be specific "YYYY-MM-DD" or just "YYYY" if the exact day is unknown or the event spans a year.
+    If the event is a single moment, set endDate to null.
     
-    Assign an "absoluteImportance" (1-100) based on its global historical impact.
+    For each event, provide 3 "altSearchTerms" (proper nouns/entities) for Wikipedia lookup.
+    
+    Assign an "absoluteImportance" (1-100) based on global historical impact.
     
     Return ONLY valid JSON.
     Format:
     {
       "events": [
         { 
-          "date": "YYYY-MM-DD", 
-          "title": "Specific Concise Event", 
-          "description": "Compelling historical summary", 
+          "startDate": "YYYY-MM-DD or YYYY", 
+          "endDate": "YYYY-MM-DD or YYYY or null", 
+          "title": "Concise Event Name", 
+          "description": "Historical summary", 
           "absoluteImportance": 85,
-          "altSearchTerms": ["Broad Entity Name", "Related Major Event", "Subject Category"]
+          "altSearchTerms": ["Entity", "Topic", "Category"]
         }
       ]
     }`;
@@ -265,7 +302,6 @@ export default function App() {
 
       setStatusMessage(`Sourcing historical imagery...`);
       
-      // Fetch images for each new event using the Fallback logic
       const eventsWithImages = await Promise.all(newRawEvents.map(async (e, idx) => {
         const imageUrl = await getImageWithFallback(e.title, e.altSearchTerms);
         return {
@@ -276,7 +312,6 @@ export default function App() {
       }));
       
       const updatedList = [...events, ...eventsWithImages];
-      
       setEvents(calculateRelativeImportance(updatedList));
       setShowAddDialog(false);
       setStatusMessage(`Successfully integrated ${eventsWithImages.length} events.`);
@@ -325,15 +360,16 @@ export default function App() {
         headers.forEach((h, idx) => {
           let val = row[idx]?.replace(/^"|"$/g, '').trim();
           if (h === 'importance' || h === 'absoluteimportance') obj.absoluteImportance = parseInt(val) || 50;
+          else if (h === 'startdate' || h === 'date') obj.startDate = val;
+          else if (h === 'enddate') obj.endDate = val === 'null' ? null : val;
           else obj[h] = val;
         });
         return obj;
-      }).filter(e => e.date && e.title);
+      }).filter(e => e.startDate && e.title);
 
       setStatusMessage("Finding images for imported data...");
       
       const parsedWithImages = await Promise.all(rawParsed.map(async (e) => {
-        // Only fetch if imageurl wasn't in the CSV
         const img = e.imageurl || await fetchWikiImage(e.title);
         return { ...e, imageurl: img };
       }));
@@ -372,10 +408,10 @@ export default function App() {
             
             <div className="hidden md:flex flex-col min-w-0">
               <h1 className="text-sm font-bold tracking-tight text-slate-900 truncate">
-                {timelineTitle || "Timeline"}
+                {timelineTitle || "Timeline Pro"}
               </h1>
               <p className="text-[11px] font-medium text-slate-500 italic truncate">
-                {timelineDesc || "Create a timeline and start generating!"}
+                {timelineDesc || "Research a topic and visualize the narrative."}
               </p>
             </div>
           </div>
@@ -415,15 +451,6 @@ export default function App() {
               <ZoomIn size={20} />
             </button>
           </div>
-        </div>
-
-        <div className="md:hidden px-6 py-2 bg-slate-50/50 border-t border-slate-100 flex flex-col min-w-0">
-          <h1 className="text-xs font-bold text-slate-900 truncate">
-            {timelineTitle || "Timeline"}
-          </h1>
-          <p className="text-[10px] font-medium text-slate-500 italic truncate">
-            {timelineDesc || "Create a timeline and start generating!"}
-          </p>
         </div>
 
         {showZoomSlider && (
@@ -474,7 +501,8 @@ export default function App() {
                     <div className="p-8">
                       <div className="flex justify-between items-center mb-4">
                         <span className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 bg-slate-50 px-3 py-1.5 rounded-full border border-slate-100">
-                          {new Date(evt.date).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })}
+                          {formatDisplayDate(evt.startDate)}
+                          {evt.endDate && ` — ${formatDisplayDate(evt.endDate)}`}
                         </span>
                         <div className="flex gap-1 items-center">
                           <button onClick={() => setActiveEventDetails(evt)} className="p-1.5 text-slate-300 hover:text-blue-500 transition-colors opacity-0 group-hover:opacity-100" title="Information">
@@ -511,8 +539,8 @@ export default function App() {
                  <p>{activeEventDetails.title}</p>
                </div>
                <div className="p-4 bg-slate-50 rounded-2xl">
-                 <p className="text-[10px] text-slate-400 uppercase font-black tracking-widest mb-1">Date</p>
-                 <p>{activeEventDetails.date}</p>
+                 <p className="text-[10px] text-slate-400 uppercase font-black tracking-widest mb-1">Timeframe</p>
+                 <p>{formatDisplayDate(activeEventDetails.startDate)} {activeEventDetails.endDate ? `to ${formatDisplayDate(activeEventDetails.endDate)}` : ''}</p>
                </div>
                <div className="p-4 bg-slate-50 rounded-2xl">
                  <p className="text-[10px] text-slate-400 uppercase font-black tracking-widest mb-1">Description</p>
@@ -527,10 +555,6 @@ export default function App() {
                    <p className="text-[10px] text-slate-400 uppercase font-black tracking-widest mb-1">Relative Tier</p>
                    <p>{activeEventDetails.relativeImportance}</p>
                  </div>
-               </div>
-               <div className="p-4 bg-slate-50 rounded-2xl">
-                 <p className="text-[10px] text-slate-400 uppercase font-black tracking-widest mb-1">Image Source</p>
-                 <p className="break-all font-mono text-[10px] text-blue-600">{activeEventDetails.imageurl || 'No image found'}</p>
                </div>
              </div>
              <button onClick={() => setActiveEventDetails(null)} className="mt-8 w-full py-4 bg-slate-900 text-white font-bold rounded-2xl shadow-lg">Close View</button>
@@ -610,11 +634,6 @@ export default function App() {
               </div>
             </div>
 
-            <div className="flex items-center gap-2 mb-4 text-slate-400 font-black uppercase tracking-widest text-[10px]">
-              <FolderOpen size={14} />
-              <span>Archived Timelines</span>
-            </div>
-            
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 overflow-y-auto custom-scrollbar pr-2 flex-1">
               {savedTimelines.length === 0 ? (
                 <div className="col-span-full py-20 text-center text-slate-400 font-serif italic">Your library is currently empty.</div>
