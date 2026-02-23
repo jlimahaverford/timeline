@@ -16,7 +16,8 @@ import {
   Trash2,
   Settings,
   ChevronRight,
-  Info
+  Info,
+  Search
 } from 'lucide-react';
 
 // Firebase Imports
@@ -39,7 +40,6 @@ import {
 
 /**
  * CUSTOM LOGO COMPONENT
- * Refined to match the user-provided image exactly.
  */
 const TimelineLogo = ({ size = 36 }) => (
   <svg width={size} height={size} viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -52,6 +52,15 @@ const TimelineLogo = ({ size = 36 }) => (
       strokeLinecap="round" 
       strokeLinejoin="round"
     />
+  </svg>
+);
+
+/**
+ * CURVED FOUR POINTED STAR ICON (Diamond replacement)
+ */
+const StarIcon = ({ size = 18 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M12 2C12 7 7 12 2 12C7 12 12 17 12 22C12 17 17 12 22 12C17 12 12 7 12 2Z" />
   </svg>
 );
 
@@ -93,7 +102,7 @@ if (firebaseConfig && firebaseConfig.apiKey) {
 
 export default function App() {
   const [user, setUser] = useState(null);
-  const [timelineTitle, setTimelineTitle] = useState(''); // Default empty to show "Timeline"
+  const [timelineTitle, setTimelineTitle] = useState(''); 
   const [timelineDesc, setTimelineDesc] = useState(''); 
   const [events, setEvents] = useState([]);
   const [zoomLevel, setZoomLevel] = useState(10); 
@@ -105,7 +114,7 @@ export default function App() {
   const [showLibrary, setShowLibrary] = useState(false);
   const [showNewDialog, setShowNewDialog] = useState(false);
   const [showAddDialog, setShowAddDialog] = useState(false);
-  const [showSheetDialog, setShowSheetDialog] = useState(false);
+  const [showZoomSlider, setShowZoomSlider] = useState(false);
   const [savedTimelines, setSavedTimelines] = useState([]);
   
   // Input Temp States
@@ -274,7 +283,7 @@ export default function App() {
       }).filter(e => e.date && e.title);
       
       setEvents(calculateRelativeImportance(parsed));
-      setShowSheetDialog(false);
+      setSheetUrl('');
       setStatusMessage("Import successful.");
     } catch (e) { setError("Failed to parse sheet."); }
     finally { setLoading(false); setTimeout(() => setStatusMessage(''), 3000); }
@@ -297,44 +306,81 @@ export default function App() {
   return (
     <div className="h-screen w-screen bg-[#fafaf9] text-slate-900 font-sans flex flex-col overflow-hidden">
       
-      {/* Control Bar */}
-      <header className="bg-white border-b border-slate-200 px-6 py-2.5 z-50 shrink-0 shadow-sm flex items-center justify-between gap-6">
-        <div className="flex items-center gap-6 flex-1 min-w-0">
-          {/* 1. App Icon */}
-          <div className="flex items-center gap-3 shrink-0">
-            <TimelineLogo size={36} />
-            <div className="h-8 w-[1px] bg-slate-100 mx-1" />
+      {/* Reorganized Control Bar */}
+      <header className="bg-white border-b border-slate-200 z-50 shrink-0 shadow-sm flex flex-col transition-all">
+        {/* Row 1: Logo, Metadata (Desktop), and Controls */}
+        <div className="px-6 py-2.5 flex items-center justify-between gap-6">
+          <div className="flex items-center gap-6 flex-1 min-w-0">
+            <div className="flex items-center gap-3 shrink-0">
+              <TimelineLogo size={36} />
+              <div className="h-8 w-[1px] bg-slate-100 mx-1" />
+            </div>
+            
+            {/* Desktop Title & Description */}
+            <div className="hidden md:flex flex-col min-w-0">
+              <h1 className="text-sm font-bold tracking-tight text-slate-900 truncate">
+                {timelineTitle || "Timeline"}
+              </h1>
+              <p className="text-[11px] font-medium text-slate-500 italic truncate">
+                {timelineDesc || "Create a timeline and start generating!"}
+              </p>
+            </div>
           </div>
-          
-          {/* 2. Title & Description */}
-          <div className="flex flex-col min-w-0">
-            <h1 className="text-sm font-bold tracking-tight text-slate-900 truncate">
-              {timelineTitle || "Timeline"}
-            </h1>
-            <p className="text-[11px] font-medium text-slate-500 italic truncate">
-              {timelineDesc || "Create a timeline and start generating!"}
-            </p>
+
+          {/* Controls: Plus, Folder, |, Disk, Star, Zoom */}
+          <div className="flex items-center gap-1 shrink-0">
+            <button onClick={() => setShowNewDialog(true)} className="p-2 rounded-xl hover:bg-slate-100 text-slate-600 transition-colors" title="New Timeline">
+              <Plus size={20} />
+            </button>
+            <button onClick={() => setShowLibrary(true)} className="p-2 rounded-xl hover:bg-slate-100 text-slate-600 transition-colors" title="Open Library">
+              <FolderOpen size={20} />
+            </button>
+            
+            <div className="h-6 w-[1px] bg-slate-200 mx-2" />
+
+            <button onClick={handleSave} className="p-2 rounded-xl hover:bg-slate-100 text-slate-600 transition-colors" title="Save Timeline">
+              <Save size={20} />
+            </button>
+            <button onClick={() => setShowAddDialog(true)} className="p-2 rounded-xl text-blue-600 hover:bg-blue-50 transition-colors" title="Add Events">
+              <StarIcon size={20} />
+            </button>
+            <button onClick={() => setShowZoomSlider(!showZoomSlider)} className={`p-2 rounded-xl transition-colors ${showZoomSlider ? 'bg-slate-900 text-white' : 'hover:bg-slate-100 text-slate-600'}`} title="Zoom Controls">
+              <ZoomIn size={20} />
+            </button>
           </div>
         </div>
 
-        {/* 3. Buttons & 4. Scroll bar */}
-        <div className="flex items-center gap-4 shrink-0">
-          <div className="flex items-center gap-1">
-            <button onClick={() => setShowNewDialog(true)} className="p-2 rounded-xl hover:bg-slate-100 text-slate-600 transition-colors" title="New Timeline"><Plus size={18} /></button>
-            <button onClick={() => setShowLibrary(true)} className="p-2 rounded-xl hover:bg-slate-100 text-slate-600 transition-colors" title="Open Library"><FolderOpen size={18} /></button>
-            <button onClick={handleSave} className="p-2 rounded-xl hover:bg-slate-100 text-slate-600 transition-colors" title="Save Timeline"><Save size={18} /></button>
-            <button onClick={() => setShowAddDialog(true)} className="p-2 rounded-xl bg-blue-50 text-blue-600 hover:bg-blue-100 transition-colors shadow-sm" title="AI: Add Events"><Diamond size={18} /></button>
-            <button onClick={() => setShowSheetDialog(true)} className="p-2 rounded-xl hover:bg-slate-100 text-slate-600 transition-colors" title="Import Sheet"><FileSpreadsheet size={18} /></button>
-          </div>
-
-          <div className="h-6 w-[1px] bg-slate-200" />
-
-          <div className="flex items-center gap-2.5 bg-slate-50 px-3 py-1.5 rounded-full border border-slate-100">
-            <ZoomOut size={13} className="text-slate-400" />
-            <input type="range" min="1" max="10" value={zoomLevel} onChange={(e)=>setZoomLevel(parseInt(e.target.value))} className="w-24 md:w-32 accent-slate-900 cursor-pointer h-1.5"/>
-            <ZoomIn size={13} className="text-slate-400" />
-          </div>
+        {/* Mobile Metadata Bar */}
+        <div className="md:hidden px-6 py-2 bg-slate-50/50 border-t border-slate-100 flex flex-col min-w-0">
+          <h1 className="text-xs font-bold text-slate-900 truncate">
+            {timelineTitle || "Timeline"}
+          </h1>
+          <p className="text-[10px] font-medium text-slate-500 italic truncate">
+            {timelineDesc || "Create a timeline and start generating!"}
+          </p>
         </div>
+
+        {/* Semantic Zooming Controls (Toggled) */}
+        {showZoomSlider && (
+          <div className="px-6 py-3 bg-slate-50 border-t border-slate-100 flex items-center justify-center gap-4 animate-in slide-in-from-top-2">
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Detail Level</span>
+            <div className="flex items-center gap-3 bg-white px-4 py-2 rounded-full border border-slate-200 shadow-sm">
+              <ZoomOut size={14} className="text-slate-400" />
+              <input 
+                type="range" 
+                min="1" 
+                max="10" 
+                value={zoomLevel} 
+                onChange={(e)=>setZoomLevel(parseInt(e.target.value))} 
+                className="w-48 md:w-64 accent-slate-900 cursor-pointer h-1.5"
+              />
+              <ZoomIn size={14} className="text-slate-400" />
+            </div>
+            <button onClick={() => setShowZoomSlider(false)} className="p-1 hover:bg-slate-200 rounded-full">
+              <X size={14} className="text-slate-400" />
+            </button>
+          </div>
+        )}
       </header>
 
       <main className="flex-1 relative overflow-hidden flex flex-col">
@@ -352,8 +398,8 @@ export default function App() {
               
               {visibleEvents.length === 0 ? (
                 <div className="w-[30vw] flex flex-col items-center justify-center text-slate-300 gap-4 opacity-50">
-                  <Sparkles size={48} className="animate-pulse" />
-                  <p className="font-serif italic text-lg text-center">Your timeline is blank. Click the diamond to populate it.</p>
+                  <StarIcon size={48} />
+                  <p className="font-serif italic text-lg text-center">Your timeline is blank. Click the star to populate it.</p>
                 </div>
               ) : visibleEvents.map((evt) => (
                 <div key={evt.id} className="relative flex flex-col items-center justify-end w-[320px] md:w-[400px] shrink-0 snap-center group">
@@ -408,7 +454,9 @@ export default function App() {
       {showAddDialog && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-blue-900/40 backdrop-blur-sm p-6">
           <div className="bg-white rounded-[2.5rem] shadow-2xl max-w-lg w-full p-10 animate-in zoom-in-95">
-            <div className="bg-blue-600 w-12 h-12 rounded-2xl flex items-center justify-center text-white mb-6 shadow-lg"><Diamond size={24} /></div>
+            <div className="bg-blue-600 w-12 h-12 rounded-2xl flex items-center justify-center text-white mb-6 shadow-lg">
+              <StarIcon size={24} />
+            </div>
             <h2 className="text-3xl font-serif font-bold text-slate-900 mb-2">Add Content</h2>
             <p className="text-slate-500 mb-8 text-sm font-medium">How many new events should the AI research for your <b>{timelineTitle || 'current'}</b> timeline?</p>
             
@@ -428,16 +476,44 @@ export default function App() {
         </div>
       )}
 
-      {/* Open Library Modal */}
+      {/* Open Library Modal (Integrated Spreadsheet Import) */}
       {showLibrary && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-6">
           <div className="bg-white rounded-[2.5rem] shadow-2xl max-w-4xl w-full p-10 animate-in zoom-in-95 flex flex-col max-h-[85vh]">
-            <div className="flex justify-between items-center mb-8">
-              <h2 className="text-3xl font-serif font-bold text-slate-900">Archived Timelines</h2>
+            <div className="flex justify-between items-center mb-6">
+              <h2 className="text-3xl font-serif font-bold text-slate-900">Library</h2>
               <button onClick={()=>setShowLibrary(false)} className="p-2 hover:bg-slate-100 rounded-full transition-colors"><X size={24}/></button>
             </div>
+
+            {/* Google Sheets Integration inside Library */}
+            <div className="mb-8 p-6 bg-green-50 rounded-3xl border border-green-100">
+              <div className="flex items-center gap-2 mb-3 text-green-700 font-bold text-sm">
+                <FileSpreadsheet size={18} />
+                <span>Import from Google Sheets</span>
+              </div>
+              <div className="flex gap-2">
+                <input 
+                  value={sheetUrl} 
+                  onChange={(e)=>setSheetUrl(e.target.value)} 
+                  placeholder="Paste Public Sheet URL..." 
+                  className="flex-1 px-4 py-2.5 bg-white border border-green-200 rounded-xl outline-none focus:ring-4 focus:ring-green-500/10 font-mono text-[10px]"
+                />
+                <button 
+                  onClick={loadFromSheet} 
+                  disabled={loading || !sheetUrl} 
+                  className="px-6 py-2.5 bg-green-600 text-white font-bold rounded-xl shadow-sm hover:bg-green-700 disabled:opacity-50 transition-all text-xs"
+                >
+                  Import CSV
+                </button>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 mb-4 text-slate-400 font-black uppercase tracking-widest text-[10px]">
+              <FolderOpen size={14} />
+              <span>Archived Timelines</span>
+            </div>
             
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 overflow-y-auto custom-scrollbar pr-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 overflow-y-auto custom-scrollbar pr-2 flex-1">
               {savedTimelines.length === 0 ? (
                 <div className="col-span-full py-20 text-center text-slate-400 font-serif italic">Your library is currently empty.</div>
               ) : savedTimelines.map(tl => (
@@ -461,22 +537,6 @@ export default function App() {
                   </div>
                 </div>
               ))}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Spreadsheet Dialog */}
-      {showSheetDialog && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-green-900/30 backdrop-blur-sm p-6">
-          <div className="bg-white rounded-[2.5rem] shadow-2xl max-w-lg w-full p-10 animate-in zoom-in-95">
-            <div className="bg-green-600 w-12 h-12 rounded-2xl flex items-center justify-center text-white mb-6 shadow-lg"><FileSpreadsheet size={24} /></div>
-            <h2 className="text-3xl font-serif font-bold text-slate-900 mb-2">Import Spreadsheet</h2>
-            <p className="text-slate-500 mb-8 text-sm font-medium">Paste a Public Google Sheet URL. Headers should include: <i>date, title, description, image, absoluteimportance</i>.</p>
-            <input value={sheetUrl} onChange={(e)=>setSheetUrl(e.target.value)} placeholder="https://docs.google.com/spreadsheets/d/..." className="w-full px-6 py-4 bg-slate-50 border border-slate-200 rounded-2xl mb-8 outline-none focus:ring-4 focus:ring-green-500/10 font-mono text-xs" />
-            <div className="flex gap-3">
-              <button onClick={()=>setShowSheetDialog(false)} className="flex-1 py-4 text-slate-400 font-bold hover:bg-slate-50 rounded-2xl transition-all">Cancel</button>
-              <button onClick={loadFromSheet} disabled={loading || !sheetUrl} className="flex-[2] py-4 bg-green-600 text-white font-bold rounded-2xl shadow-lg hover:bg-green-700 disabled:opacity-50 transition-all">Import CSV</button>
             </div>
           </div>
         </div>
