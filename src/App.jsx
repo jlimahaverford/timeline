@@ -2,26 +2,21 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { 
   ZoomIn, 
   ZoomOut, 
-  Link as LinkIcon, 
-  AlertCircle, 
-  Info, 
-  Share2, 
-  Layers, 
-  Calendar, 
-  HelpCircle, 
-  X, 
-  Sparkles,
-  ChevronLeft,
-  ChevronRight,
-  RefreshCw,
-  Search,
-  Image as ImageIcon,
-  Save,
+  Plus,
   FolderOpen,
-  User,
+  Save,
+  Diamond,
+  FileSpreadsheet,
+  Settings,
+  Layers,
+  Calendar,
+  X,
+  RefreshCw,
+  Sparkles,
   Trash2,
+  Image as ImageIcon,
   CheckCircle2,
-  Settings
+  AlertCircle
 } from 'lucide-react';
 
 // Firebase Imports
@@ -29,37 +24,24 @@ import { initializeApp } from 'firebase/app';
 import { getAuth, onAuthStateChanged, signInAnonymously, signInWithCustomToken } from 'firebase/auth';
 import { getFirestore, doc, setDoc, collection, onSnapshot, deleteDoc, serverTimestamp } from 'firebase/firestore';
 
-/**
- * CONFIGURATION LOADER
- * Detects if we are in the Canvas sandbox or a Vercel/Vite production build.
- */
 const getSafeConfig = () => {
   let config = {
     firebaseConfig: null,
-    appId: "timeline-pro-production",
-    geminiKey: "",
-    isSandbox: false
+    appId: "timeline-pro-v2",
+    geminiKey: "" 
   };
 
-  // 1. Sandbox Environment (Canvas)
   if (typeof __firebase_config !== 'undefined' && __firebase_config) {
-    config.isSandbox = true;
     try {
       config.firebaseConfig = typeof __firebase_config === 'string' ? JSON.parse(__firebase_config) : __firebase_config;
       config.appId = typeof __app_id !== 'undefined' ? __app_id : "timeline-pro-sandbox";
-    } catch (e) { console.error("Sandbox config parse error"); }
+    } catch (e) { console.error("Config parse error"); }
   }
 
-  // 2. Production Environment (Vercel/Vite)
   try {
-    // @ts-ignore
     const env = import.meta.env;
     if (env) {
-      if (env.VITE_FIREBASE_CONFIG) {
-        config.firebaseConfig = typeof env.VITE_FIREBASE_CONFIG === 'string' 
-          ? JSON.parse(env.VITE_FIREBASE_CONFIG) 
-          : env.VITE_FIREBASE_CONFIG;
-      }
+      if (env.VITE_FIREBASE_CONFIG) config.firebaseConfig = JSON.parse(env.VITE_FIREBASE_CONFIG);
       if (env.VITE_APP_ID) config.appId = env.VITE_APP_ID;
       if (env.VITE_GEMINI_API_KEY) config.geminiKey = env.VITE_GEMINI_API_KEY;
     }
@@ -69,11 +51,10 @@ const getSafeConfig = () => {
   return config;
 };
 
-const { firebaseConfig, appId, geminiKey, isSandbox } = getSafeConfig();
+const { firebaseConfig, appId, geminiKey } = getSafeConfig();
 
-// Initialize Firebase services outside the component to prevent re-initialization
 let auth, db;
-if (firebaseConfig && firebaseConfig.apiKey) {
+if (firebaseConfig?.apiKey) {
   try {
     const app = initializeApp(firebaseConfig);
     auth = getAuth(app);
@@ -81,43 +62,56 @@ if (firebaseConfig && firebaseConfig.apiKey) {
   } catch (e) { console.error("Firebase Init Error:", e); }
 }
 
-const DEFAULT_SHEET_URL = "https://docs.google.com/spreadsheets/d/1PUuaIAelViebAgOjtf3vXeMy-k59e82fDIn253s7EFM/edit?gid=0#gid=0";
+/**
+ * Custom Logo Component matching the uploaded reference image.
+ * A black rounded icon with a thin dividing line and a subtle, small 't' tick.
+ */
+const TimelineLogo = () => (
+  <div className="w-12 h-12 shrink-0 shadow-2xl overflow-hidden rounded-[12px] bg-black flex items-center justify-center">
+    <svg viewBox="0 0 100 100" className="w-full h-full">
+      {/* Horizontal Divider - positioned slightly above center */}
+      <line x1="0" y1="48" x2="100" y2="48" stroke="white" strokeWidth="3.5" />
+      {/* Smaller, subtle 't' tick with a soft curve at the bottom */}
+      <path 
+        d="M50 41 V54 Q50 59 56 59" 
+        stroke="white" 
+        strokeWidth="3.5" 
+        fill="none" 
+        strokeLinecap="round" 
+      />
+    </svg>
+  </div>
+);
 
 export default function App() {
   const [user, setUser] = useState(null);
   const [events, setEvents] = useState([]);
-  const [zoomLevel, setZoomLevel] = useState(10); 
-  const [sheetUrl, setSheetUrl] = useState(DEFAULT_SHEET_URL);
-  const [aiTopic, setAiTopic] = useState('');
+  const [timelineTitle, setTimelineTitle] = useState('Timeline');
+  const [timelineDesc, setTimelineDesc] = useState('Create a timeline and start generating!');
+  const [zoomLevel, setZoomLevel] = useState(5);
   const [loading, setLoading] = useState(false);
-  const [statusMessage, setStatusMessage] = useState('');
+  const [status, setStatus] = useState('');
   const [error, setError] = useState('');
-  const [shareSuccess, setShareSuccess] = useState(false);
-  const [showSettings, setShowSettings] = useState(true);
-  const [showLibrary, setShowLibrary] = useState(false);
-  const [showSaveDialog, setShowSaveDialog] = useState(false);
-  const [saveName, setSaveName] = useState('');
-  const [savedTimelines, setSavedTimelines] = useState([]);
   
-  const scrollContainerRef = useRef(null);
-  const dateDisplayRef = useRef(null);
-  const eventRefs = useRef({});
+  // Modal States
+  const [activeModal, setActiveModal] = useState(null); // 'new', 'add-ai', 'sheet', 'library'
+  const [inputVal, setInputVal] = useState('');
+  const [inputVal2, setInputVal2] = useState('');
+  const [savedTimelines, setSavedTimelines] = useState([]);
 
-  // Auth Initialization (Mandatory Rule 3)
+  const scrollContainerRef = useRef(null);
+
+  // Auth (Rule 3)
   useEffect(() => {
     if (!auth) return;
     const initAuth = async () => {
-      if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-        try {
-          await signInWithCustomToken(auth, __initial_auth_token);
-          return;
-        } catch (e) { console.warn("Custom token login failed."); }
-      } 
       try {
-        if (!auth.currentUser) await signInAnonymously(auth);
-      } catch (err) {
-        setError("Database restricted. Ensure Firebase Auth is enabled.");
-      }
+        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+          await signInWithCustomToken(auth, __initial_auth_token);
+        } else {
+          await signInAnonymously(auth);
+        }
+      } catch (err) { setError("Database restricted."); }
     };
     initAuth();
     const unsubscribe = onAuthStateChanged(auth, setUser);
@@ -127,199 +121,174 @@ export default function App() {
   // Library Sync (Rule 1 & 2)
   useEffect(() => {
     if (!user || !db) return;
-    const libraryCol = collection(db, 'artifacts', appId, 'users', user.uid, 'timelines');
-    const unsubscribe = onSnapshot(libraryCol, (snapshot) => {
-      const timelines = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      setSavedTimelines(timelines.sort((a, b) => (b.updatedAt?.seconds || 0) - (a.updatedAt?.seconds || 0)));
-    }, (err) => console.error("Firestore sync error:", err));
+    const colRef = collection(db, 'artifacts', appId, 'users', user.uid, 'timelines');
+    const unsubscribe = onSnapshot(colRef, (snap) => {
+      const tls = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setSavedTimelines(tls.sort((a, b) => (b.updatedAt?.seconds || 0) - (a.updatedAt?.seconds || 0)));
+    });
     return () => unsubscribe();
   }, [user]);
 
+  // Recalculate Relative Importance (1-10 evenly spread)
+  const normalizeEvents = (rawEvents) => {
+    if (rawEvents.length === 0) return [];
+    
+    // Sort by absolute importance (ascending)
+    const sorted = [...rawEvents].sort((a, b) => (a.absImp || 0) - (b.absImp || 0));
+    const count = sorted.length;
+    
+    return sorted.map((evt, index) => {
+      // Calculate decile: spread index over 10 buckets
+      const relativeImp = Math.min(10, Math.floor((index / count) * 10) + 1);
+      return { ...evt, relImp: relativeImp };
+    });
+  };
+
   const optimizeImageUrl = (url) => {
-    if (!url || typeof url !== 'string') return '';
-    let val = url.trim();
-    const wikiMatch = val.match(/(?:wiki\/|File:|title=File:)([^&?#]+)/i);
+    if (!url) return '';
+    const wikiMatch = url.match(/(?:wiki\/|File:|title=File:)([^&?#]+)/i);
     if (wikiMatch) {
       let filename = wikiMatch[1].replace(/^File:/i, '');
       try {
         filename = decodeURIComponent(filename).replace(/\s/g, '_');
-        return `https://commons.wikimedia.org/w/index.php?title=Special:FilePath&file=${filename}&width=1200`;
-      } catch (e) { return val; }
+        return `https://commons.wikimedia.org/w/index.php?title=Special:FilePath&file=${filename}&width=1000`;
+      } catch (e) { return url; }
     }
-    const driveMatch = val.match(/drive\.google\.com\/file\/d\/([a-zA-Z0-9_-]+)/);
-    if (driveMatch) return `https://drive.google.com/uc?id=${driveMatch[1]}`;
-    return val;
+    return url;
   };
 
   const parseCSV = (text) => {
     const lines = text.split(/\r?\n/).filter(line => line.trim());
     if (lines.length < 2) throw new Error("Source is empty.");
     const headers = lines[0].split(',').map(h => h.replace(/^"|"$/g, '').trim().toLowerCase());
-    const parsedEvents = [];
+    const parsed = [];
     for (let i = 1; i < lines.length; i++) {
       const row = [];
-      let inQuotes = false, currentVal = '';
+      let inQuotes = false, current = '';
       for (let char of lines[i]) {
         if (char === '"') inQuotes = !inQuotes;
-        else if (char === ',' && !inQuotes) { row.push(currentVal); currentVal = ''; }
-        else currentVal += char;
+        else if (char === ',' && !inQuotes) { row.push(current); current = ''; }
+        else current += char;
       }
-      row.push(currentVal);
-      const event = { id: `evt-${i}-${Date.now()}` };
+      row.push(current);
+      const event = { id: `csv-${i}-${Date.now()}` };
       headers.forEach((h, idx) => {
         let v = row[idx]?.replace(/^"|"$/g, '').trim() || '';
-        if (h === 'importance') v = parseInt(v, 10) || 1;
-        if (['image', 'imageurl', 'img'].includes(h)) { event.imageurl = optimizeImageUrl(v); }
+        if (h === 'importance' || h === 'abs_importance') event.absImp = parseInt(v) || 50;
+        else if (['image', 'imageurl', 'img'].includes(h)) event.imageurl = optimizeImageUrl(v);
         else event[h] = v;
       });
-      if (event.date && event.title && !isNaN(new Date(event.date).getTime())) parsedEvents.push(event);
+      if (event.date && event.title) parsed.push(event);
     }
-    return parsedEvents.sort((a, b) => new Date(a.date) - new Date(b.date));
+    setEvents(normalizeEvents(parsed));
   };
 
-  const loadFromSheet = async (url) => {
+  const handleCreateNew = () => {
+    setTimelineTitle(inputVal || "Timeline");
+    setTimelineDesc(inputVal2 || "Create a timeline and start generating!");
+    setEvents([]);
+    setActiveModal(null);
+    setInputVal('');
+    setInputVal2('');
+  };
+
+  const handleAddAI = async () => {
+    const count = parseInt(inputVal) || 5;
+    if (count < 1 || count > 10) return;
+    setLoading(true);
+    setActiveModal(null);
+    setStatus(`AI is expanding "${timelineTitle}"...`);
+    
+    const existingTitles = events.map(e => e.title).join(', ');
+    const prompt = `
+      CONTEXT:
+      Timeline Title: ${timelineTitle}
+      Timeline Description: ${timelineDesc}
+      Current Events: ${existingTitles}
+
+      TASK:
+      Generate ${count} NEW and UNIQUE historical events for this timeline. 
+      DO NOT repeat current events.
+      Provide "absImp" (Absolute Importance) as an integer from 1-100.
+      
+      Return JSON only: { "events": [{ "date": "YYYY-MM-DD", "title": "string", "description": "string", "imageurl": "Wikimedia file URL", "absImp": 1-100 }] }
+    `;
+
+    try {
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${geminiKey}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: { responseMimeType: "application/json" }
+        })
+      });
+      const data = await response.json();
+      const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text;
+      const newEvts = JSON.parse(rawText).events.map((e, idx) => ({
+        ...e,
+        id: `ai-${idx}-${Date.now()}`,
+        imageurl: optimizeImageUrl(e.imageurl)
+      }));
+      
+      setEvents(prev => normalizeEvents([...prev, ...newEvts]));
+      setStatus("Timeline updated.");
+      setTimeout(() => setStatus(''), 3000);
+    } catch (err) { setError("AI generation failed."); }
+    finally { setLoading(false); setInputVal(''); }
+  };
+
+  const handleSheetImport = async () => {
+    const url = inputVal;
     if (!url) return;
     setLoading(true);
-    setStatusMessage('Syncing with Google Sheets...');
-    setError('');
-    let fetchUrl = url;
-    const sheetIdMatch = url.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
-    if (sheetIdMatch && !url.includes('tqx=out:csv')) {
-      fetchUrl = `https://docs.google.com/spreadsheets/d/${sheetIdMatch[1]}/gviz/tq?tqx=out:csv&gid=${url.match(/[#&?]gid=([0-9]+)/)?.[1] || '0'}`;
-    }
+    setActiveModal(null);
     try {
-      const response = await fetch(fetchUrl);
-      const csvText = await response.text();
-      setEvents(parseCSV(csvText));
-      setStatusMessage('Data synced successfully.');
-      setTimeout(() => setStatusMessage(''), 3000);
-    } catch (err) { setError("Load failed. Ensure your Sheet is set to 'Anyone with link can view'."); }
-    finally { setLoading(false); }
+      let fetchUrl = url;
+      const idMatch = url.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
+      if (idMatch) fetchUrl = `https://docs.google.com/spreadsheets/d/${idMatch[1]}/gviz/tq?tqx=out:csv&gid=${url.match(/[#&?]gid=([0-9]+)/)?.[1] || '0'}`;
+      const res = await fetch(fetchUrl);
+      const csv = await res.text();
+      parseCSV(csv);
+      setStatus("Import complete.");
+    } catch (e) { setError("Sheet import failed."); }
+    finally { setLoading(false); setInputVal(''); }
   };
 
-  const handleAIGeneration = async () => {
-    if (!aiTopic || loading) return;
-    const apiKey = (geminiKey || "").trim();
-    
-    // Canvas injects the key automatically at runtime, so we only validate for Vercel Prod
-    if (!isSandbox && !apiKey) {
-      setError("Gemini API Key missing. Please set VITE_GEMINI_API_KEY.");
-      return;
-    }
-    
-    setLoading(true);
-    setError('');
-    setStatusMessage(`Researching "${aiTopic}"...`);
-    
-    // Branching the endpoint: Canvas requires the preview model to bypass API key validation, 
-    // but Prod stays completely locked to your stable v1 flash-lite choice!
-    const apiVersion = isSandbox ? 'v1beta' : 'v1';
-    const modelName = isSandbox ? 'gemini-2.5-flash-preview-09-2025' : 'gemini-2.5-flash-lite';
-    const endpoint = `https://generativelanguage.googleapis.com/${apiVersion}/models/${modelName}:generateContent?key=${apiKey}`;
-    
-    const prompt = `Generate a historical timeline for: "${aiTopic}". Include exactly 35 key events. 
-    You MUST return ONLY valid JSON. Do not include markdown formatting or backticks.
-    Format exactly like this:
-    {
-      "events": [
-        { "date": "YYYY-MM-DD", "title": "string", "description": "string", "imageurl": "Wikimedia file URL", "importance": 10 }
-      ]
-    }`;
-
-    const fetchWithRetry = async (attempt = 0) => {
-      try {
-        // Ultra-stable, lowest-common-denominator payload. No generationConfig to cause 400 errors.
-        const payload = {
-          contents: [{ parts: [{ text: prompt }] }]
-        };
-
-        const response = await fetch(endpoint, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
-        });
-        
-        if (!response.ok) {
-          const errorText = await response.text();
-          throw new Error(`API Error: ${response.status} - ${errorText.substring(0, 1000)}`);
-        }
-        
-        const data = await response.json();
-        let text = data.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
-
-        // Extremely robust JSON extraction using regex, in case the model ignored our "no markdown" rule
-        const jsonMatch = text.match(/\{[\s\S]*\}/);
-        if (jsonMatch) {
-          text = jsonMatch[0];
-        }
-
-        const parsedData = JSON.parse(text);
-        return parsedData.events || [];
-      } catch (err) {
-        if (attempt < 5) {
-          const delay = Math.pow(2, attempt) * 1000;
-          await new Promise(r => setTimeout(r, delay));
-          return fetchWithRetry(attempt + 1);
-        }
-        throw err;
-      }
-    };
-
-    try {
-      const gen = await fetchWithRetry();
-      if (gen && gen.length > 0) {
-        const sortedGen = gen.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-        setEvents(sortedGen.map((e, idx) => ({ 
-          ...e, 
-          id: `ai-${idx}-${Date.now()}`, 
-          imageurl: optimizeImageUrl(e.imageurl),
-          importance: parseInt(e.importance, 10) || 5 
-        })));
-        setStatusMessage("Timeline generated.");
-      } else {
-        throw new Error("No events returned from API.");
-      }
-      setTimeout(() => setStatusMessage(''), 3000);
-    } catch (err) { setError(`AI Generation failed: ${err.message}`); }
-    finally { setLoading(false); }
-  };
-
-  const saveTimeline = async () => {
-    if (!user || !db || !saveName.trim() || events.length === 0) return;
+  const handleSave = async () => {
+    if (!user || !db || events.length === 0) return;
     setLoading(true);
     try {
-      const id = saveName.toLowerCase().replace(/\s+/g, '-').slice(0, 40) + '-' + Date.now();
+      const id = timelineTitle.toLowerCase().replace(/\s+/g, '-').slice(0, 30) + '-' + Date.now();
       await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'timelines', id), {
-        name: String(saveName),
+        title: timelineTitle,
+        description: timelineDesc,
         events,
-        zoomLevel,
-        topic: String(aiTopic || "Custom"),
         updatedAt: serverTimestamp()
       });
-      setShowSaveDialog(false);
-      setSaveName('');
-      setStatusMessage("Project archived in cloud.");
-      setTimeout(() => setStatusMessage(''), 3000);
-    } catch (err) { setError("Save failed. Check Firebase Security Rules."); }
+      setStatus("Archived to Cloud.");
+      setTimeout(() => setStatus(''), 3000);
+    } catch (e) { setError("Save failed."); }
     finally { setLoading(false); }
   };
 
-  const deleteTimeline = async (id, e) => {
-    e.stopPropagation();
-    if (!db || !user) return;
-    try { await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'timelines', id)); }
-    catch (err) { setError("Delete failed."); }
+  const handleLoad = (tl) => {
+    setTimelineTitle(tl.title);
+    setTimelineDesc(tl.description);
+    setEvents(tl.events);
+    setActiveModal(null);
   };
 
-  const loadTimelineFromLibrary = (tl) => {
-    setEvents(tl.events);
-    setZoomLevel(tl.zoomLevel || 10);
-    setAiTopic(tl.topic || '');
-    setShowLibrary(false);
+  const handleDelete = async (id, e) => {
+    e.stopPropagation();
+    if (!db || !user) return;
+    await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'timelines', id));
   };
 
   const visibleEvents = useMemo(() => 
-    events.filter(e => (parseInt(e.importance, 10) || 1) >= (11 - zoomLevel)), 
+    [...events]
+      .filter(e => (e.relImp || 1) >= (11 - zoomLevel))
+      .sort((a, b) => new Date(a.date) - new Date(b.date)),
   [events, zoomLevel]);
 
   const layoutItems = useMemo(() => {
@@ -329,7 +298,7 @@ export default function App() {
       const year = new Date(event.date).getFullYear();
       if (lastYear !== null && year > lastYear) {
         const gap = year - lastYear;
-        const step = gap > 100 ? 50 : (gap > 20 ? 10 : 1);
+        const step = gap > 100 ? 50 : (gap > 20 ? 10 : 5);
         for (let y = lastYear + step; y < year; y += step) {
           items.push({ type: 'marker', year: y, id: `m-${y}-${idx}` });
         }
@@ -343,143 +312,98 @@ export default function App() {
   const ImageWithFallback = ({ src, alt }) => {
     const [failed, setFailed] = useState(false);
     if (failed || !src) return (
-      <div className="h-full w-full bg-slate-50 flex flex-col items-center justify-center border-b">
-        <ImageIcon size={32} className="text-slate-200 mb-2" />
-        <span className="text-[10px] font-bold text-slate-300 uppercase tracking-widest">No Image</span>
+      <div className="h-full w-full bg-slate-100 flex flex-col items-center justify-center">
+        <ImageIcon size={32} className="text-slate-300 mb-2" />
+        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">No Media</span>
       </div>
     );
-    return (
-      <img src={src} alt={alt} referrerPolicy="no-referrer" 
-        className="w-full h-full object-cover transition-all duration-700 group-hover:scale-110" 
-        onError={() => setFailed(true)} />
-    );
+    return <img src={src} alt={alt} className="w-full h-full object-cover" onError={() => setFailed(true)} />;
   };
-
-  if (!firebaseConfig || !firebaseConfig.apiKey) {
-    return (
-      <div className="h-screen bg-slate-50 flex flex-col items-center justify-center p-8 text-center">
-        <div className="bg-white p-12 rounded-[3rem] shadow-2xl max-w-md border border-slate-100">
-          <Settings size={64} className="mx-auto mb-6 text-amber-500 animate-spin-slow" />
-          <h2 className="text-3xl font-serif font-bold text-slate-900 mb-4 text-center">Setup Required</h2>
-          <p className="text-slate-500 mb-8 leading-relaxed text-center">Please add your Firebase Configuration to Vercel's environment variables.</p>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div className="h-screen w-screen bg-[#fafaf9] text-slate-900 font-sans flex flex-col overflow-hidden selection:bg-blue-100">
       
-      <header className="bg-white/90 backdrop-blur-md border-b border-slate-200 px-6 py-4 z-50 shrink-0 shadow-sm">
+      {/* HEADER COMMAND BAR */}
+      <header className="bg-white/95 backdrop-blur-md border-b border-slate-200 px-6 py-4 z-50 shrink-0 shadow-sm">
         <div className="max-w-7xl mx-auto flex flex-col md:flex-row gap-4 items-center justify-between">
-          <div className="flex items-center gap-4">
-            <div className="bg-slate-900 text-white p-2.5 rounded-2xl shadow-lg"><Layers size={22} /></div>
-            <div>
-              <h1 className="text-xl font-bold font-serif text-slate-900 tracking-tight">Timeline Pro</h1>
-              <div className="flex items-center gap-2 text-[10px] text-slate-400 uppercase tracking-widest font-bold">
-                <span className={`w-1.5 h-1.5 rounded-full ${user ? 'bg-green-500 animate-pulse' : 'bg-slate-300'}`} />
-                {user ? `Connected: ${user.uid.slice(0, 8)}` : 'Connecting...'}
-              </div>
+          
+          {/* Metadata Display / Logo */}
+          <div className="flex items-center gap-5">
+            <TimelineLogo />
+            <div className="max-w-md">
+              <h1 className="text-xl font-bold font-serif text-slate-900 truncate tracking-tight">{timelineTitle}</h1>
+              <p className="text-[11px] text-slate-500 font-medium line-clamp-1 italic">{timelineDesc}</p>
             </div>
           </div>
 
+          {/* Core Controls */}
           <div className="flex items-center gap-2">
-            <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-full mr-2 shadow-inner">
+            <div className="flex items-center gap-1 bg-slate-100 p-1.5 rounded-full mr-3 shadow-inner">
               <button onClick={() => setZoomLevel(Math.max(1, zoomLevel - 1))} className="p-1.5 hover:bg-white rounded-full transition-all text-slate-500"><ZoomOut size={16}/></button>
-              <input type="range" min="1" max="10" value={zoomLevel} onChange={(e)=>setZoomLevel(parseInt(e.target.value))} className="w-16 md:w-24 accent-slate-800 cursor-pointer"/>
+              <input type="range" min="1" max="10" value={zoomLevel} onChange={(e)=>setZoomLevel(parseInt(e.target.value))} className="w-20 md:w-32 accent-slate-800 cursor-pointer"/>
               <button onClick={() => setZoomLevel(Math.min(10, zoomLevel + 1))} className="p-1.5 hover:bg-white rounded-full transition-all text-slate-500"><ZoomIn size={16}/></button>
             </div>
-            <button onClick={() => setShowLibrary(!showLibrary)} className={`p-2.5 rounded-full border transition-all ${showLibrary ? 'bg-slate-900 text-white shadow-lg' : 'bg-white text-slate-600 hover:bg-slate-50'}`}><FolderOpen size={18} /></button>
-            <button onClick={() => setShowSaveDialog(true)} disabled={events.length === 0} className="p-2.5 rounded-full border bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-30 transition-all shadow-sm"><Save size={18} /></button>
-            <button onClick={() => setShowSettings(!showSettings)} className={`p-2.5 rounded-full border transition-all ${showSettings ? 'bg-slate-900 text-white shadow-lg' : 'bg-white text-slate-600'}`}><Search size={18} /></button>
+
+            <div className="flex items-center gap-1.5">
+              <button title="New Timeline" onClick={() => setActiveModal('new')} className="p-3 rounded-full border bg-white hover:bg-slate-50 transition-all text-slate-700 shadow-sm"><Plus size={18} /></button>
+              <button title="Library" onClick={() => setActiveModal('library')} className="p-3 rounded-full border bg-white hover:bg-slate-50 transition-all text-slate-700 shadow-sm"><FolderOpen size={18} /></button>
+              <button title="Save" onClick={handleSave} disabled={events.length === 0} className="p-3 rounded-full border bg-white hover:bg-slate-50 disabled:opacity-30 transition-all text-slate-700 shadow-sm"><Save size={18} /></button>
+              <button title="AI Add Events" onClick={() => setActiveModal('add-ai')} disabled={events.length === 0 && timelineTitle === 'Timeline'} className="p-3 rounded-full bg-blue-600 text-white hover:bg-blue-700 shadow-lg disabled:opacity-30 transition-all"><Diamond size={18} /></button>
+              <button title="Import Sheet" onClick={() => setActiveModal('sheet')} className="p-3 rounded-full border bg-white hover:bg-slate-50 transition-all text-slate-700 shadow-sm"><FileSpreadsheet size={18} /></button>
+            </div>
           </div>
         </div>
 
-        {showSettings && (
-          <div className="max-w-7xl mx-auto mt-6 grid grid-cols-1 lg:grid-cols-2 gap-4 animate-in slide-in-from-top-4">
-            <input type="text" placeholder="Sheet URL (CSV Mode)..." value={sheetUrl} onChange={(e)=>setSheetUrl(e.target.value)} onKeyDown={(e)=>e.key==='Enter'&&loadFromSheet(sheetUrl)} className="flex-1 px-4 py-3 bg-slate-50 border rounded-2xl text-sm font-mono outline-none shadow-inner"/>
-            <div className="flex gap-2">
-              <input type="text" placeholder="AI Research Topic..." value={aiTopic} onChange={(e)=>setAiTopic(e.target.value)} onKeyDown={(e)=>e.key==='Enter'&&handleAIGeneration()} className="flex-1 px-4 py-3 bg-blue-50/30 border border-blue-100 rounded-2xl text-sm outline-none shadow-inner"/>
-              <button onClick={handleAIGeneration} disabled={loading} className="px-6 py-3 bg-blue-600 text-white rounded-2xl font-bold shadow-md active:scale-95 transition-all flex items-center gap-2">
-                {loading ? <RefreshCw size={16} className="animate-spin" /> : <Sparkles size={16} />} Generate
-              </button>
-            </div>
-          </div>
-        )}
-
-        {showLibrary && (
-          <div className="max-w-7xl mx-auto mt-6 p-6 bg-slate-900 rounded-[2.5rem] shadow-2xl animate-in slide-in-from-top-4">
-            <div className="flex justify-between items-center mb-6 px-2 text-white font-serif text-lg font-bold">
-              <span className="flex items-center gap-2"><FolderOpen size={18} className="text-blue-400"/> My Archives</span>
-              <button onClick={()=>setShowLibrary(false)} className="p-2 hover:bg-slate-800 rounded-full"><X size={20}/></button>
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 max-h-[40vh] overflow-y-auto custom-scrollbar p-1">
-              {savedTimelines.length === 0 ? (
-                <div className="col-span-full py-12 text-center text-slate-500 text-sm italic">Library is empty. Save a project to archive it here.</div>
-              ) : savedTimelines.map(tl => (
-                <div key={tl.id} onClick={()=>loadTimelineFromLibrary(tl)} className="bg-slate-800 hover:bg-slate-700 p-5 rounded-2xl cursor-pointer transition-all border border-slate-700 group relative">
-                  <div className="flex justify-between items-start mb-3">
-                    <span className="text-white font-bold text-sm leading-tight line-clamp-1">{tl.name}</span>
-                    <button onClick={(e)=>deleteTimeline(tl.id, e)} className="text-slate-500 hover:text-red-400 opacity-0 group-hover:opacity-100 p-1"><Trash2 size={14}/></button>
-                  </div>
-                  <div className="text-[10px] text-slate-500 flex justify-between uppercase font-bold tracking-widest">
-                    <span>{tl.events?.length || 0} pts</span>
-                    <span>{tl.updatedAt?.seconds ? new Date(tl.updatedAt.seconds * 1000).toLocaleDateString() : '---'}</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {(error || statusMessage || loading) && (
-          <div className="max-w-7xl mx-auto mt-4">
-            {error && <div className="text-sm text-red-600 flex items-center gap-2 bg-red-50 p-4 rounded-2xl border border-red-100 animate-in fade-in">{String(error)}</div>}
-            {statusMessage && <div className="text-sm text-blue-700 flex items-center gap-2 bg-blue-50 p-4 rounded-2xl border border-blue-100 shadow-sm animate-in fade-in">{String(statusMessage)}</div>}
+        {/* Status Bar */}
+        {(status || error || loading) && (
+          <div className="max-w-7xl mx-auto mt-3 animate-in fade-in slide-in-from-top-2">
+            {error && <div className="text-xs text-red-600 bg-red-50 py-2 px-4 rounded-full border border-red-100 flex items-center gap-2"><AlertCircle size={14}/> {error}</div>}
+            {status && <div className="text-xs text-blue-700 bg-blue-50 py-2 px-4 rounded-full border border-blue-100 flex items-center gap-2"><CheckCircle2 size={14}/> {status}</div>}
+            {loading && <div className="text-xs text-slate-500 flex items-center gap-2 px-4 py-2"><RefreshCw size={14} className="animate-spin"/> processing...</div>}
           </div>
         )}
       </header>
 
+      {/* MAIN TIMELINE CANVAS */}
       <main className="flex-1 relative overflow-hidden flex flex-col">
-        <div className="absolute top-10 left-1/2 -translate-x-1/2 z-40 pointer-events-none">
-          <div className="bg-slate-900/95 backdrop-blur-xl text-white px-10 py-3 rounded-full shadow-2xl flex items-center gap-4 border border-white/10">
-            <Calendar size={18} className="text-slate-400" />
-            <span className="font-serif font-black tracking-[0.2em] text-xl uppercase min-w-[160px] text-center">Narrative</span>
-          </div>
-        </div>
-
-        {/* Crucial Horizontal Layout Logic:
-           - flex-1 and overflow-x-auto on the parent.
-           - inline-flex and items-end on the content wrapper.
-           - whitespace-nowrap or flex-row inside items.
-        */}
         <div ref={scrollContainerRef} className="flex-1 overflow-x-auto overflow-y-hidden custom-scrollbar snap-x snap-mandatory">
-          <div className="h-full inline-flex items-end pb-32 px-[15vw] md:px-[35vw] min-w-full">
-            <div className="flex items-end gap-16 relative">
-              <div className="absolute bottom-0 left-[-3000px] right-[-3000px] h-1.5 bg-slate-200 z-0 opacity-50" />
-              {layoutItems.map((item) => (
+          <div className="h-full inline-flex items-end pb-40 px-[30vw] min-w-full">
+            <div className="flex items-end gap-20 relative">
+              <div className="absolute bottom-0 left-[-5000px] right-[-5000px] h-1.5 bg-slate-200 z-0" />
+              
+              {layoutItems.length === 0 ? (
+                <div className="w-[40vw] flex flex-col items-center justify-center text-slate-300 font-serif italic text-2xl opacity-40 mb-32">
+                  <Sparkles size={48} className="mb-4" />
+                  Your timeline starts here.
+                </div>
+              ) : layoutItems.map((item) => (
                 item.type === 'marker' ? (
                   <div key={item.id} className="relative flex flex-col items-center justify-end w-24 shrink-0">
-                    <div className="w-[2px] h-16 bg-slate-300 absolute -bottom-2" />
-                    <div className="absolute -bottom-12 text-[10px] font-black text-slate-400 tracking-[0.3em]">{item.year}</div>
+                    <div className="w-[1px] h-12 bg-slate-300 absolute -bottom-1" />
+                    <div className="absolute -bottom-10 text-[11px] font-black text-slate-400 tracking-[0.2em]">{item.year}</div>
                   </div>
                 ) : (
-                  <div key={item.id} className="relative flex flex-col items-center justify-end w-[320px] md:w-[420px] shrink-0 snap-center group">
-                    <div className="w-full bg-white rounded-[3rem] border border-slate-100 shadow-2xl transition-all duration-700 overflow-hidden flex flex-col mb-16 relative z-20 hover:-translate-y-8 hover:shadow-[0_40px_80px_rgba(0,0,0,0.1)] transition-all">
-                      <div className="h-48 md:h-64 overflow-hidden relative bg-slate-100 flex items-center justify-center">
+                  <div key={item.id} className="relative flex flex-col items-center justify-end w-[350px] md:w-[450px] shrink-0 snap-center group">
+                    <div className="w-full bg-white rounded-[3rem] border border-slate-100 shadow-2xl transition-all duration-500 overflow-hidden flex flex-col mb-20 relative z-20 hover:-translate-y-6 hover:shadow-[0_30px_60px_rgba(0,0,0,0.12)]">
+                      <div className="h-48 md:h-64 overflow-hidden relative bg-slate-50">
                         <ImageWithFallback src={item.data.imageurl} alt={item.data.title} />
+                        <div className="absolute top-6 left-6 flex gap-2">
+                           <span className="text-[9px] font-black uppercase tracking-widest text-white bg-slate-900/80 backdrop-blur px-3 py-1.5 rounded-full">
+                            {new Date(item.data.date).getFullYear()}
+                           </span>
+                        </div>
                       </div>
                       <div className="p-10">
-                        <div className="flex justify-between items-center mb-6">
-                          <span className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 bg-slate-50 px-4 py-2 rounded-full border border-slate-100">{new Date(item.data.date).toLocaleDateString()}</span>
-                          <span className="text-[10px] font-bold text-blue-500">Imp. {item.data.importance}</span>
+                        <h3 className="font-serif font-bold text-2xl md:text-3xl text-slate-900 leading-tight mb-4 group-hover:text-blue-600 transition-colors line-clamp-2">{item.data.title}</h3>
+                        <p className="text-base text-slate-500 leading-relaxed line-clamp-4 italic font-medium">"{item.data.description}"</p>
+                        <div className="mt-8 pt-6 border-t border-slate-50 flex justify-between items-center text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                          <span>{new Date(item.data.date).toLocaleDateString(undefined, { month: 'long', day: 'numeric' })}</span>
+                          <span className="text-blue-500/60">Rank: {item.data.absImp}</span>
                         </div>
-                        <h3 className="font-serif font-bold text-2xl md:text-3xl text-slate-900 leading-[1.15] mb-6 group-hover:text-blue-600 transition-colors line-clamp-2">{item.data.title}</h3>
-                        <p className="text-base text-slate-500 leading-relaxed line-clamp-4 font-medium italic">"{item.data.description}"</p>
                       </div>
                     </div>
-                    <div className="w-[4px] h-16 bg-slate-900 group-hover:h-24 transition-all duration-700 z-10" />
-                    <div className="absolute -bottom-3 w-6 h-6 rounded-full bg-white border-[6px] border-slate-900 shadow-2xl z-20 group-hover:scale-150 transition-transform duration-700" />
+                    <div className="w-[4px] h-20 bg-slate-900 group-hover:h-28 transition-all duration-500 z-10" />
+                    <div className="absolute -bottom-4 w-8 h-8 rounded-full bg-white border-[8px] border-slate-900 shadow-xl z-20 group-hover:scale-125 transition-transform duration-500" />
                   </div>
                 )
               ))}
@@ -488,27 +412,75 @@ export default function App() {
         </div>
       </main>
 
-      {showSaveDialog && (
+      {/* MODAL SYSTEM */}
+      {activeModal && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/90 backdrop-blur-md p-6">
-          <div className="bg-white rounded-[3.5rem] shadow-2xl max-w-lg w-full p-12 animate-in zoom-in-95">
-            <h2 className="text-3xl font-serif font-bold text-slate-900 mb-4">Archive Project</h2>
-            <p className="text-slate-500 mb-10 leading-relaxed font-medium">Your work will be securely saved to your private cloud library.</p>
-            <input autoFocus type="text" placeholder="Timeline Name..." value={saveName} onChange={(e)=>setSaveName(e.target.value)} onKeyDown={(e)=>e.key==='Enter'&&saveTimeline()} className="w-full px-8 py-5 bg-slate-50 border border-slate-200 rounded-[2rem] mb-10 text-xl font-medium focus:ring-4 focus:ring-blue-500/10 focus:outline-none transition-all shadow-inner" />
-            <div className="flex gap-4">
-              <button onClick={()=>setShowSaveDialog(false)} className="flex-1 py-5 text-slate-400 font-bold hover:bg-slate-50 rounded-[2rem] transition-all text-lg">Discard</button>
-              <button onClick={saveTimeline} disabled={!saveName.trim() || loading} className="flex-[2] py-5 bg-blue-600 text-white font-bold rounded-[2rem] shadow-2xl hover:bg-blue-700 disabled:opacity-50 transition-all text-lg">{loading ? 'Archiving...' : 'Save to Cloud'}</button>
-            </div>
+          <div className="bg-white rounded-[3.5rem] shadow-2xl max-w-xl w-full p-12 animate-in zoom-in-95 relative">
+            <button onClick={() => setActiveModal(null)} className="absolute top-8 right-8 p-3 hover:bg-slate-50 rounded-full text-slate-400"><X size={24}/></button>
+            
+            {activeModal === 'new' && (
+              <>
+                <h2 className="text-3xl font-serif font-bold text-slate-900 mb-2">New Narrative</h2>
+                <p className="text-slate-500 mb-8 font-medium">Define the focus of your historical journey.</p>
+                <input placeholder="Title (e.g., The Industrial Revolution)" value={inputVal} onChange={(e)=>setInputVal(e.target.value)} className="w-full px-6 py-4 bg-slate-50 border rounded-2xl mb-4 text-lg outline-none focus:ring-2 ring-blue-500/20" />
+                <textarea placeholder="Brief description..." rows={3} value={inputVal2} onChange={(e)=>setInputVal2(e.target.value)} className="w-full px-6 py-4 bg-slate-50 border rounded-2xl mb-8 text-lg outline-none focus:ring-2 ring-blue-500/20" />
+                <button onClick={handleCreateNew} className="w-full py-5 bg-slate-900 text-white font-bold rounded-2xl hover:bg-slate-800 transition-all text-lg">Create Timeline</button>
+              </>
+            )}
+
+            {activeModal === 'add-ai' && (
+              <>
+                <div className="flex items-center gap-4 mb-4">
+                  <div className="bg-blue-100 text-blue-600 p-3 rounded-2xl"><Diamond size={24}/></div>
+                  <h2 className="text-3xl font-serif font-bold text-slate-900">Add Events</h2>
+                </div>
+                <p className="text-slate-500 mb-8 font-medium italic">Gemini will analyze "{timelineTitle}" and suggest new unique moments.</p>
+                <div className="mb-8">
+                  <label className="text-[10px] font-bold uppercase tracking-widest text-slate-400 block mb-3 px-2">How many events? (1-10)</label>
+                  <input type="number" min="1" max="10" value={inputVal} onChange={(e)=>setInputVal(e.target.value)} placeholder="5" className="w-full px-8 py-5 bg-slate-50 border border-slate-200 rounded-2xl text-2xl font-bold focus:outline-none focus:ring-4 focus:ring-blue-100 transition-all" />
+                </div>
+                <button onClick={handleAddAI} className="w-full py-6 bg-blue-600 text-white font-bold rounded-2xl shadow-xl hover:bg-blue-700 transition-all text-lg flex items-center justify-center gap-3">
+                  <Sparkles size={20}/> Generate Events
+                </button>
+              </>
+            )}
+
+            {activeModal === 'sheet' && (
+              <>
+                <h2 className="text-3xl font-serif font-bold text-slate-900 mb-2">Sheet Import</h2>
+                <p className="text-slate-500 mb-8 font-medium">Paste your Google Sheet URL. Ensure headers include: Date, Title, Description, Importance.</p>
+                <input placeholder="https://docs.google.com/spreadsheets/..." value={inputVal} onChange={(e)=>setInputVal(e.target.value)} className="w-full px-6 py-4 bg-slate-50 border rounded-2xl mb-8 outline-none" />
+                <button onClick={handleSheetImport} className="w-full py-5 bg-green-600 text-white font-bold rounded-2xl hover:bg-green-700 transition-all text-lg">Sync Data</button>
+              </>
+            )}
+
+            {activeModal === 'library' && (
+              <>
+                <h2 className="text-3xl font-serif font-bold text-slate-900 mb-6 flex items-center gap-3"><FolderOpen size={28} className="text-blue-500"/> Archives</h2>
+                <div className="max-h-[50vh] overflow-y-auto space-y-3 pr-2 custom-scrollbar">
+                  {savedTimelines.length === 0 ? (
+                    <p className="text-center py-12 text-slate-400 italic">No saved projects found.</p>
+                  ) : savedTimelines.map(tl => (
+                    <div key={tl.id} onClick={() => handleLoad(tl)} className="group flex justify-between items-center p-5 bg-slate-50 border rounded-2xl cursor-pointer hover:bg-white hover:shadow-lg hover:border-blue-100 transition-all">
+                      <div>
+                        <h4 className="font-bold text-slate-900">{tl.title}</h4>
+                        <p className="text-[10px] text-slate-500 uppercase tracking-widest mt-1 font-bold">{tl.events?.length || 0} Events • {tl.updatedAt?.seconds ? new Date(tl.updatedAt.seconds * 1000).toLocaleDateString() : 'Draft'}</p>
+                      </div>
+                      <button onClick={(e) => handleDelete(tl.id, e)} className="p-2 text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all"><Trash2 size={16}/></button>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
 
       <style dangerouslySetInnerHTML={{__html: `
-        .custom-scrollbar::-webkit-scrollbar { height: 10px; background: transparent; }
-        .custom-scrollbar::-webkit-scrollbar-thumb { background-color: #cbd5e1; border-radius: 30px; border: 3px solid #fafaf9; background-clip: content-box; }
+        .custom-scrollbar::-webkit-scrollbar { height: 8px; width: 6px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 20px; border: 2px solid transparent; background-clip: content-box; }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
         .animate-in { animation: fadeIn 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
-        .animate-spin-slow { animation: spin 8s linear infinite; }
-        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
       `}} />
     </div>
   );
