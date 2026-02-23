@@ -38,6 +38,24 @@ import {
 } from 'firebase/firestore';
 
 /**
+ * CUSTOM LOGO COMPONENT
+ * Refined to match the user-provided image exactly.
+ */
+const TimelineLogo = ({ size = 36 }) => (
+  <svg width={size} height={size} viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <rect width="100" height="100" rx="28" fill="black"/>
+    <path d="M0 50.5H100" stroke="white" strokeWidth="2.5"/>
+    <path 
+      d="M50 38V58C50 61.5 51.5 63 54.5 63" 
+      stroke="white" 
+      strokeWidth="4" 
+      strokeLinecap="round" 
+      strokeLinejoin="round"
+    />
+  </svg>
+);
+
+/**
  * CONFIGURATION LOADER
  */
 const getSafeConfig = () => {
@@ -75,8 +93,8 @@ if (firebaseConfig && firebaseConfig.apiKey) {
 
 export default function App() {
   const [user, setUser] = useState(null);
-  const [timelineTitle, setTimelineTitle] = useState('Untitled Timeline');
-  const [timelineDesc, setTimelineDesc] = useState('Start building your narrative...');
+  const [timelineTitle, setTimelineTitle] = useState(''); // Default empty to show "Timeline"
+  const [timelineDesc, setTimelineDesc] = useState(''); 
   const [events, setEvents] = useState([]);
   const [zoomLevel, setZoomLevel] = useState(10); 
   
@@ -125,19 +143,12 @@ export default function App() {
 
   /**
    * RELATIVE IMPORTANCE ENGINE
-   * Takes events with absolute importance (1-100) and distributes them 
-   * evenly across 1-10 levels for semantic zooming.
    */
   const calculateRelativeImportance = (rawEvents) => {
     if (rawEvents.length === 0) return [];
-    
-    // 1. Sort by absolute importance
     const sorted = [...rawEvents].sort((a, b) => (a.absoluteImportance || 0) - (b.absoluteImportance || 0));
     const total = sorted.length;
-    
-    // 2. Map index to a 1-10 level (even distribution)
     return sorted.map((evt, idx) => {
-      // Logic: split total count into 10 buckets
       const level = Math.min(10, Math.ceil(((idx + 1) / total) * 10));
       return { ...evt, relativeImportance: level };
     }).sort((a, b) => new Date(a.date) - new Date(b.date));
@@ -155,8 +166,8 @@ export default function App() {
 
   const handleCreateNew = () => {
     setEvents([]);
-    setTimelineTitle(newTitle || 'Untitled Timeline');
-    setTimelineDesc(newDesc || 'No description provided.');
+    setTimelineTitle(newTitle);
+    setTimelineDesc(newDesc);
     setNewTitle('');
     setNewDesc('');
     setShowNewDialog(false);
@@ -178,7 +189,7 @@ export default function App() {
     const endpoint = `https://generativelanguage.googleapis.com/${apiVersion}/models/${modelName}:generateContent?key=${apiKey}`;
     
     const existingTitles = events.map(e => e.title).join(', ');
-    const prompt = `You are a historian. I have a timeline titled "${timelineTitle}" with description: "${timelineDesc}".
+    const prompt = `You are a historian. I have a timeline titled "${timelineTitle || 'Historical events'}" with description: "${timelineDesc || 'General history'}".
     Currently, the timeline has these events: [${existingTitles}].
     
     Task: Add ${numToAdd} NEW, UNIQUE key events that are relevant but not already listed.
@@ -225,9 +236,9 @@ export default function App() {
     if (!user || !db || events.length === 0) return;
     setLoading(true);
     try {
-      const id = timelineTitle.toLowerCase().replace(/\s+/g, '-').slice(0, 30) + '-' + Date.now();
+      const id = (timelineTitle || 'timeline').toLowerCase().replace(/\s+/g, '-').slice(0, 30) + '-' + Date.now();
       await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'timelines', id), {
-        name: timelineTitle,
+        name: timelineTitle || 'Untitled',
         description: timelineDesc,
         events,
         updatedAt: serverTimestamp()
@@ -248,7 +259,6 @@ export default function App() {
     try {
       const response = await fetch(fetchUrl);
       const csvText = await response.text();
-      // Simple CSV Parse
       const lines = csvText.split(/\r?\n/).filter(l => l.trim());
       const headers = lines[0].split(',').map(h => h.replace(/^"|"$/g, '').toLowerCase().trim());
       const parsed = lines.slice(1).map((line, i) => {
@@ -280,7 +290,6 @@ export default function App() {
     return <img src={src} alt={alt} referrerPolicy="no-referrer" className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700" onError={() => setFailed(true)} />;
   };
 
-  // Zoom filter logic
   const visibleEvents = useMemo(() => 
     events.filter(e => (e.relativeImportance || 1) >= (11 - zoomLevel)), 
   [events, zoomLevel]);
@@ -289,44 +298,44 @@ export default function App() {
     <div className="h-screen w-screen bg-[#fafaf9] text-slate-900 font-sans flex flex-col overflow-hidden">
       
       {/* Control Bar */}
-      <header className="bg-white border-b border-slate-200 px-6 py-3 z-50 shrink-0 shadow-sm flex items-center justify-between">
-        <div className="flex items-center gap-6">
-          <div className="flex items-center gap-2">
-            <div className="bg-slate-900 text-white p-2 rounded-xl"><Layers size={18} /></div>
-            <div className="hidden sm:block">
-              <h1 className="text-sm font-bold tracking-tight">Timeline Pro</h1>
-              <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Knowledge Map</p>
-            </div>
+      <header className="bg-white border-b border-slate-200 px-6 py-2.5 z-50 shrink-0 shadow-sm flex items-center justify-between gap-6">
+        <div className="flex items-center gap-6 flex-1 min-w-0">
+          {/* 1. App Icon */}
+          <div className="flex items-center gap-3 shrink-0">
+            <TimelineLogo size={36} />
+            <div className="h-8 w-[1px] bg-slate-100 mx-1" />
           </div>
           
-          <div className="h-8 w-[1px] bg-slate-100 mx-2" />
-
-          <div className="flex items-center gap-1.5">
-            <button onClick={() => setShowNewDialog(true)} className="p-2.5 rounded-xl hover:bg-slate-100 text-slate-600 transition-colors" title="New Timeline"><Plus size={20} /></button>
-            <button onClick={() => setShowLibrary(true)} className="p-2.5 rounded-xl hover:bg-slate-100 text-slate-600 transition-colors" title="Open Library"><FolderOpen size={20} /></button>
-            <button onClick={handleSave} className="p-2.5 rounded-xl hover:bg-slate-100 text-slate-600 transition-colors" title="Save Timeline"><Save size={20} /></button>
-            <button onClick={() => setShowAddDialog(true)} className="p-2.5 rounded-xl bg-blue-50 text-blue-600 hover:bg-blue-100 transition-colors shadow-sm" title="AI: Add Events"><Diamond size={20} /></button>
-            <button onClick={() => setShowSheetDialog(true)} className="p-2.5 rounded-xl hover:bg-slate-100 text-slate-600 transition-colors" title="Import Sheet"><FileSpreadsheet size={20} /></button>
+          {/* 2. Title & Description */}
+          <div className="flex flex-col min-w-0">
+            <h1 className="text-sm font-bold tracking-tight text-slate-900 truncate">
+              {timelineTitle || "Timeline"}
+            </h1>
+            <p className="text-[11px] font-medium text-slate-500 italic truncate">
+              {timelineDesc || "Create a timeline and start generating!"}
+            </p>
           </div>
         </div>
 
-        <div className="flex items-center gap-6">
-          <div className="flex items-center gap-3 bg-slate-50 px-4 py-2 rounded-full border border-slate-100">
-            <ZoomOut size={14} className="text-slate-400" />
-            <input type="range" min="1" max="10" value={zoomLevel} onChange={(e)=>setZoomLevel(parseInt(e.target.value))} className="w-24 md:w-40 accent-slate-900 cursor-pointer"/>
-            <ZoomIn size={14} className="text-slate-400" />
+        {/* 3. Buttons & 4. Scroll bar */}
+        <div className="flex items-center gap-4 shrink-0">
+          <div className="flex items-center gap-1">
+            <button onClick={() => setShowNewDialog(true)} className="p-2 rounded-xl hover:bg-slate-100 text-slate-600 transition-colors" title="New Timeline"><Plus size={18} /></button>
+            <button onClick={() => setShowLibrary(true)} className="p-2 rounded-xl hover:bg-slate-100 text-slate-600 transition-colors" title="Open Library"><FolderOpen size={18} /></button>
+            <button onClick={handleSave} className="p-2 rounded-xl hover:bg-slate-100 text-slate-600 transition-colors" title="Save Timeline"><Save size={18} /></button>
+            <button onClick={() => setShowAddDialog(true)} className="p-2 rounded-xl bg-blue-50 text-blue-600 hover:bg-blue-100 transition-colors shadow-sm" title="AI: Add Events"><Diamond size={18} /></button>
+            <button onClick={() => setShowSheetDialog(true)} className="p-2 rounded-xl hover:bg-slate-100 text-slate-600 transition-colors" title="Import Sheet"><FileSpreadsheet size={18} /></button>
           </div>
-          <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest hidden md:block">
-            {events.length} Events • Zoom level {zoomLevel}
+
+          <div className="h-6 w-[1px] bg-slate-200" />
+
+          <div className="flex items-center gap-2.5 bg-slate-50 px-3 py-1.5 rounded-full border border-slate-100">
+            <ZoomOut size={13} className="text-slate-400" />
+            <input type="range" min="1" max="10" value={zoomLevel} onChange={(e)=>setZoomLevel(parseInt(e.target.value))} className="w-24 md:w-32 accent-slate-900 cursor-pointer h-1.5"/>
+            <ZoomIn size={13} className="text-slate-400" />
           </div>
         </div>
       </header>
-
-      {/* Narrative Info (Title/Desc Display) */}
-      <div className="bg-white border-b border-slate-100 px-8 py-4 flex flex-col md:flex-row items-baseline gap-4 shadow-sm z-40">
-        <h2 className="text-2xl font-serif font-black text-slate-900 tracking-tight">{timelineTitle}</h2>
-        <p className="text-slate-500 font-medium italic text-sm border-l-0 md:border-l border-slate-200 md:pl-4">{timelineDesc}</p>
-      </div>
 
       <main className="flex-1 relative overflow-hidden flex flex-col">
         {/* Status / Errors */}
@@ -344,7 +353,7 @@ export default function App() {
               {visibleEvents.length === 0 ? (
                 <div className="w-[30vw] flex flex-col items-center justify-center text-slate-300 gap-4 opacity-50">
                   <Sparkles size={48} className="animate-pulse" />
-                  <p className="font-serif italic text-lg text-center">Your history is blank. Click the diamond to populate it.</p>
+                  <p className="font-serif italic text-lg text-center">Your timeline is blank. Click the diamond to populate it.</p>
                 </div>
               ) : visibleEvents.map((evt) => (
                 <div key={evt.id} className="relative flex flex-col items-center justify-end w-[320px] md:w-[400px] shrink-0 snap-center group">
@@ -381,7 +390,7 @@ export default function App() {
       {showNewDialog && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-6">
           <div className="bg-white rounded-[2.5rem] shadow-2xl max-w-lg w-full p-10 animate-in zoom-in-95">
-            <h2 className="text-3xl font-serif font-bold text-slate-900 mb-2">New Narrative</h2>
+            <h2 className="text-3xl font-serif font-bold text-slate-900 mb-2">New Timeline</h2>
             <p className="text-slate-500 mb-8 text-sm font-medium">Define the scope of your timeline.</p>
             <div className="space-y-4 mb-8">
               <input value={newTitle} onChange={(e)=>setNewTitle(e.target.value)} placeholder="Timeline Title (e.g. Ancient Rome)" className="w-full px-6 py-4 bg-slate-50 border border-slate-200 rounded-2xl outline-none focus:ring-4 focus:ring-blue-500/10 transition-all font-medium" />
@@ -389,7 +398,7 @@ export default function App() {
             </div>
             <div className="flex gap-3">
               <button onClick={()=>setShowNewDialog(false)} className="flex-1 py-4 text-slate-400 font-bold hover:bg-slate-50 rounded-2xl transition-all">Cancel</button>
-              <button onClick={handleCreateNew} className="flex-[2] py-4 bg-slate-900 text-white font-bold rounded-2xl shadow-lg hover:bg-slate-800 transition-all">Create Canvas</button>
+              <button onClick={handleCreateNew} className="flex-[2] py-4 bg-slate-900 text-white font-bold rounded-2xl shadow-lg hover:bg-slate-800 transition-all">Create Timeline</button>
             </div>
           </div>
         </div>
@@ -401,7 +410,7 @@ export default function App() {
           <div className="bg-white rounded-[2.5rem] shadow-2xl max-w-lg w-full p-10 animate-in zoom-in-95">
             <div className="bg-blue-600 w-12 h-12 rounded-2xl flex items-center justify-center text-white mb-6 shadow-lg"><Diamond size={24} /></div>
             <h2 className="text-3xl font-serif font-bold text-slate-900 mb-2">Add Content</h2>
-            <p className="text-slate-500 mb-8 text-sm font-medium">How many new events should the AI research for your <b>{timelineTitle}</b> timeline?</p>
+            <p className="text-slate-500 mb-8 text-sm font-medium">How many new events should the AI research for your <b>{timelineTitle || 'current'}</b> timeline?</p>
             
             <div className="bg-slate-50 p-6 rounded-2xl border border-slate-200 mb-8 flex flex-col items-center gap-4">
               <span className="text-4xl font-black text-slate-900">{numToAdd}</span>
@@ -447,7 +456,7 @@ export default function App() {
                   </div>
                   <p className="text-xs text-slate-500 line-clamp-2 mb-6 h-8 italic font-medium">"{tl.description}"</p>
                   <div className="flex justify-between items-center text-[10px] font-black uppercase tracking-widest text-slate-400">
-                    <span>{tl.events?.length || 0} Points</span>
+                    <span>{tl.events?.length || 0} Events</span>
                     <span>{tl.updatedAt?.seconds ? new Date(tl.updatedAt.seconds * 1000).toLocaleDateString() : '---'}</span>
                   </div>
                 </div>
