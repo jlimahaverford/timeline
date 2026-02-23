@@ -24,14 +24,21 @@ import { initializeApp } from 'firebase/app';
 import { getAuth, onAuthStateChanged, signInAnonymously, signInWithCustomToken } from 'firebase/auth';
 import { getFirestore, doc, setDoc, collection, onSnapshot, deleteDoc, serverTimestamp } from 'firebase/firestore';
 
+/**
+ * CONFIGURATION LOADER
+ * Detects if we are in the Canvas sandbox or a Vercel/Vite production build.
+ */
 const getSafeConfig = () => {
   let config = {
     firebaseConfig: null,
     appId: "timeline-pro-v2",
-    geminiKey: "" 
+    geminiKey: "",
+    isSandbox: false,
   };
 
+  // 1. Sandbox Environment (Canvas)
   if (typeof __firebase_config !== 'undefined' && __firebase_config) {
+    config.isSandbox = true;
     try {
       config.firebaseConfig = typeof __firebase_config === 'string' ? JSON.parse(__firebase_config) : __firebase_config;
       config.appId = typeof __app_id !== 'undefined' ? __app_id : "timeline-pro-sandbox";
@@ -41,7 +48,11 @@ const getSafeConfig = () => {
   try {
     const env = import.meta.env;
     if (env) {
-      if (env.VITE_FIREBASE_CONFIG) config.firebaseConfig = JSON.parse(env.VITE_FIREBASE_CONFIG);
+     if (env.VITE_FIREBASE_CONFIG) {
+        config.firebaseConfig = typeof env.VITE_FIREBASE_CONFIG === 'string' 
+          ? JSON.parse(env.VITE_FIREBASE_CONFIG) 
+          : env.VITE_FIREBASE_CONFIG;
+      }
       if (env.VITE_APP_ID) config.appId = env.VITE_APP_ID;
       if (env.VITE_GEMINI_API_KEY) config.geminiKey = env.VITE_GEMINI_API_KEY;
     }
@@ -51,10 +62,11 @@ const getSafeConfig = () => {
   return config;
 };
 
-const { firebaseConfig, appId, geminiKey } = getSafeConfig();
+const { firebaseConfig, appId, geminiKey, isSandbox } = getSafeConfig();
 
+// Initialize Firebase services outside the component to prevent re-initialization
 let auth, db;
-if (firebaseConfig?.apiKey) {
+if (firebaseConfig && firebaseConfig.apiKey) {
   try {
     const app = initializeApp(firebaseConfig);
     auth = getAuth(app);
@@ -198,6 +210,19 @@ export default function App() {
     setLoading(true);
     setActiveModal(null);
     setStatus(`AI is expanding "${timelineTitle}"...`);
+
+    const apiKey = (geminiKey || "").trim();
+    
+    // Canvas injects the key automatically at runtime, so we only validate for Vercel Prod
+    if (!isSandbox && !apiKey) {
+      setError("Gemini API Key missing. Please set VITE_GEMINI_API_KEY.");
+      return;
+    }
+    // Branching the endpoint: Canvas requires the preview model to bypass API key validation, 
+    // but Prod stays completely locked to your stable v1 flash-lite choice!
+    const apiVersion = isSandbox ? 'v1beta' : 'v1';
+    const modelName = isSandbox ? 'gemini-2.5-flash-preview-09-2025' : 'gemini-2.5-flash-lite';
+    const endpoint = `https://generativelanguage.googleapis.com/${apiVersion}/models/${modelName}:generateContent?key=${apiKey}`;
     
     const existingTitles = events.map(e => e.title).join(', ');
     const prompt = `
@@ -215,7 +240,7 @@ export default function App() {
     `;
 
     try {
-      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${geminiKey}`, {
+      const response = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
