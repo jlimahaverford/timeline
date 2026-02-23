@@ -103,7 +103,7 @@ export default function App() {
   const dateDisplayRef = useRef(null);
   const eventRefs = useRef({});
 
-  // Auth Initialization
+  // Auth Initialization (Mandatory Rule 3)
   useEffect(() => {
     if (!auth) return;
     const initAuth = async () => {
@@ -124,7 +124,7 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  // Library Sync
+  // Library Sync (Rule 1 & 2)
   useEffect(() => {
     if (!user || !db) return;
     const libraryCol = collection(db, 'artifacts', appId, 'users', user.uid, 'timelines');
@@ -212,19 +212,17 @@ export default function App() {
     setStatusMessage(`Researching "${aiTopic}"...`);
     
     // Branching the endpoint: Canvas requires the preview model to bypass API key validation, 
-    // but Prod stays completely locked to your stable v1 choice!
+    // but Prod stays completely locked to your stable v1 flash-lite choice!
     const apiVersion = isSandbox ? 'v1beta' : 'v1';
     const modelName = isSandbox ? 'gemini-2.5-flash-preview-09-2025' : 'gemini-2.5-flash-lite';
     const endpoint = `https://generativelanguage.googleapis.com/${apiVersion}/models/${modelName}:generateContent?key=${apiKey}`;
     
     const prompt = `Generate a historical timeline for: "${aiTopic}". Include exactly 35 key events. 
-    CRITICAL: It is incredibly important that the image URLs load. This is the most important element of the response. 
-    Prefer images from trusted sources like Wikipedia or Google Search. You must provide a valid, raw image URL for every event.
     You MUST return ONLY valid JSON. Do not include markdown formatting or backticks.
     Format exactly like this:
     {
       "events": [
-        { "date": "YYYY-MM-DD", "title": "string", "description": "string", "imageurl": "Valid image URL", "importance": 10 }
+        { "date": "YYYY-MM-DD", "title": "string", "description": "string", "imageurl": "Wikimedia file URL", "importance": 10 }
       ]
     }`;
 
@@ -347,7 +345,7 @@ export default function App() {
     if (failed || !src) return (
       <div className="h-full w-full bg-slate-50 flex flex-col items-center justify-center border-b">
         <ImageIcon size={32} className="text-slate-200 mb-2" />
-        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest text-center px-4">Image Failed to Load</span>
+        <span className="text-[10px] font-bold text-slate-300 uppercase tracking-widest">No Image</span>
       </div>
     );
     return (
@@ -450,6 +448,11 @@ export default function App() {
           </div>
         </div>
 
+        {/* Crucial Horizontal Layout Logic:
+           - flex-1 and overflow-x-auto on the parent.
+           - inline-flex and items-end on the content wrapper.
+           - whitespace-nowrap or flex-row inside items.
+        */}
         <div ref={scrollContainerRef} className="flex-1 overflow-x-auto overflow-y-hidden custom-scrollbar snap-x snap-mandatory">
           <div className="h-full inline-flex items-end pb-32 px-[15vw] md:px-[35vw] min-w-full">
             <div className="flex items-end gap-16 relative">
