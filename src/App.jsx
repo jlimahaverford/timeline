@@ -154,26 +154,34 @@ export default function App() {
   }, [user]);
 
   /**
+   * WIKIPEDIA IMAGE FETCHER
+   */
+  const fetchWikiImage = async (title) => {
+    try {
+      const url = `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title)}`;
+      const response = await fetch(url);
+      if (!response.ok) return '';
+      const data = await response.json();
+      return data.originalimage?.source || data.thumbnail?.source || '';
+    } catch (e) {
+      console.warn(`Wiki image fetch failed for: ${title}`);
+      return '';
+    }
+  };
+
+  /**
    * RELATIVE IMPORTANCE ENGINE
    */
   const calculateRelativeImportance = (rawEvents) => {
     if (rawEvents.length === 0) return [];
+    // Sort by absolute importance (assigned by AI)
     const sorted = [...rawEvents].sort((a, b) => (a.absoluteImportance || 0) - (b.absoluteImportance || 0));
     const total = sorted.length;
+    // Map to relative Tiers 1-10
     return sorted.map((evt, idx) => {
       const level = Math.min(10, Math.ceil(((idx + 1) / total) * 10));
       return { ...evt, relativeImportance: level };
     }).sort((a, b) => new Date(a.date) - new Date(b.date));
-  };
-
-  const optimizeImageUrl = (url) => {
-    if (!url || typeof url !== 'string') return '';
-    const wikiMatch = url.match(/(?:wiki\/|File:|title=File:)([^&?#]+)/i);
-    if (wikiMatch) {
-      let filename = wikiMatch[1].replace(/^File:/i, '');
-      try { return `https://commons.wikimedia.org/w/index.php?title=Special:FilePath&file=${decodeURIComponent(filename).replace(/\s/g, '_')}&width=1200`; } catch (e) { return url; }
-    }
-    return url;
   };
 
   const handleCreateNew = () => {
@@ -201,17 +209,18 @@ export default function App() {
     const endpoint = `https://generativelanguage.googleapis.com/${apiVersion}/models/${modelName}:generateContent?key=${apiKey}`;
     
     const existingTitles = events.map(e => e.title).join(', ');
-    const prompt = `You are a historian. I have a timeline titled "${timelineTitle || 'Historical events'}" with description: "${timelineDesc || 'General history'}".
-    Currently, the timeline has these events: [${existingTitles}].
+    const prompt = `You are an expert historian. I have a timeline titled "${timelineTitle || 'Historical events'}" with description: "${timelineDesc || 'General history'}".
+    Currently, the timeline includes: [${existingTitles}].
     
-    Task: Add ${numToAdd} NEW, UNIQUE key events that are relevant but not already listed.
-    For each event, assign an "absoluteImportance" from 1 to 100 based on its global historical impact.
+    Task: Identify ${numToAdd} NEW, UNIQUE key events relevant to this scope. 
+    Focus on events that would have a Wikipedia page.
+    For each event, assign an "absoluteImportance" (1-100) based on its global historical impact.
     
-    You MUST return ONLY valid JSON.
+    Return ONLY valid JSON.
     Format:
     {
       "events": [
-        { "date": "YYYY-MM-DD", "title": "string", "description": "string", "imageurl": "Wikimedia file URL", "absoluteImportance": 85 }
+        { "date": "YYYY-MM-DD", "title": "Wikipedia Page Title", "description": "Compelling summary", "absoluteImportance": 85 }
       ]
     }`;
 
@@ -227,21 +236,31 @@ export default function App() {
       const jsonMatch = text.match(/\{[\s\S]*\}/);
       const parsedData = JSON.parse(jsonMatch ? jsonMatch[0] : text);
       const newRawEvents = parsedData.events || [];
+
+      setStatusMessage(`Sourcing historical imagery...`);
       
-      const updatedList = [
-        ...events,
-        ...newRawEvents.map((e, idx) => ({ 
-          ...e, 
-          id: `ai-${idx}-${Date.now()}`, 
-          imageurl: optimizeImageUrl(e.imageurl) 
-        }))
-      ];
+      // Fetch images for each new event using the Wikipedia API
+      const eventsWithImages = await Promise.all(newRawEvents.map(async (e, idx) => {
+        const imageUrl = await fetchWikiImage(e.title);
+        return {
+          ...e,
+          id: `ai-${idx}-${Date.now()}`,
+          imageurl: imageUrl
+        };
+      }));
+      
+      const updatedList = [...events, ...eventsWithImages];
       
       setEvents(calculateRelativeImportance(updatedList));
       setShowAddDialog(false);
-      setStatusMessage(`Added ${newRawEvents.length} events.`);
-    } catch (err) { setError(`Failed to add events: ${err.message}`); }
-    finally { setLoading(false); setTimeout(() => setStatusMessage(''), 3000); }
+      setStatusMessage(`Successfully integrated ${eventsWithImages.length} events.`);
+    } catch (err) { 
+      console.error(err);
+      setError(`Failed to research events: ${err.message}`); 
+    } finally { 
+      setLoading(false); 
+      setTimeout(() => setStatusMessage(''), 3000); 
+    }
   };
 
   const handleSave = async () => {
@@ -273,19 +292,27 @@ export default function App() {
       const csvText = await response.text();
       const lines = csvText.split(/\r?\n/).filter(l => l.trim());
       const headers = lines[0].split(',').map(h => h.replace(/^"|"$/g, '').toLowerCase().trim());
-      const parsed = lines.slice(1).map((line, i) => {
+      
+      const rawParsed = lines.slice(1).map((line, i) => {
         const row = line.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/);
         const obj = { id: `csv-${i}-${Date.now()}` };
         headers.forEach((h, idx) => {
           let val = row[idx]?.replace(/^"|"$/g, '').trim();
           if (h === 'importance' || h === 'absoluteimportance') obj.absoluteImportance = parseInt(val) || 50;
-          else if (['image', 'img', 'imageurl'].includes(h)) obj.imageurl = optimizeImageUrl(val);
           else obj[h] = val;
         });
         return obj;
       }).filter(e => e.date && e.title);
+
+      setStatusMessage("Finding images for imported data...");
       
-      setEvents(calculateRelativeImportance(parsed));
+      const parsedWithImages = await Promise.all(rawParsed.map(async (e) => {
+        // Only fetch if imageurl wasn't in the CSV
+        const img = e.imageurl || await fetchWikiImage(e.title);
+        return { ...e, imageurl: img };
+      }));
+      
+      setEvents(calculateRelativeImportance(parsedWithImages));
       setSheetUrl('');
       setStatusMessage("Import successful.");
     } catch (e) { setError("Failed to parse sheet."); }
@@ -296,7 +323,7 @@ export default function App() {
     const [failed, setFailed] = useState(false);
     if (failed || !src) return (
       <div className="h-full w-full bg-slate-100 flex items-center justify-center text-slate-300">
-        <Calendar size={32} />
+        <ImageIcon size={32} />
       </div>
     );
     return <img src={src} alt={alt} referrerPolicy="no-referrer" className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700" onError={() => setFailed(true)} />;
@@ -309,9 +336,7 @@ export default function App() {
   return (
     <div className="h-screen w-screen bg-[#fafaf9] text-slate-900 font-sans flex flex-col overflow-hidden">
       
-      {/* Reorganized Control Bar */}
       <header className="bg-white border-b border-slate-200 z-50 shrink-0 shadow-sm flex flex-col transition-all">
-        {/* Row 1: Logo, Metadata (Desktop), and Controls */}
         <div className="px-6 py-2.5 flex items-center justify-between gap-6">
           <div className="flex items-center gap-6 flex-1 min-w-0">
             <div className="flex items-center gap-3 shrink-0">
@@ -319,7 +344,6 @@ export default function App() {
               <div className="h-8 w-[1px] bg-slate-100 mx-1" />
             </div>
             
-            {/* Desktop Title & Description */}
             <div className="hidden md:flex flex-col min-w-0">
               <h1 className="text-sm font-bold tracking-tight text-slate-900 truncate">
                 {timelineTitle || "Timeline"}
@@ -330,7 +354,6 @@ export default function App() {
             </div>
           </div>
 
-          {/* Controls: Plus, Folder, |, Star, Disk, Zoom */}
           <div className="flex items-center gap-1 shrink-0">
             <button onClick={() => setShowNewDialog(true)} className="p-2 rounded-xl hover:bg-slate-100 text-slate-600 transition-colors" title="New Timeline">
               <Plus size={20} />
@@ -368,7 +391,6 @@ export default function App() {
           </div>
         </div>
 
-        {/* Mobile Metadata Bar */}
         <div className="md:hidden px-6 py-2 bg-slate-50/50 border-t border-slate-100 flex flex-col min-w-0">
           <h1 className="text-xs font-bold text-slate-900 truncate">
             {timelineTitle || "Timeline"}
@@ -378,7 +400,6 @@ export default function App() {
           </p>
         </div>
 
-        {/* Semantic Zooming Controls (Toggled) */}
         {showZoomSlider && (
           <div className="px-6 py-3 bg-slate-50 border-t border-slate-100 flex items-center justify-center gap-4 animate-in slide-in-from-top-2">
             <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Detail Level</span>
@@ -402,13 +423,14 @@ export default function App() {
       </header>
 
       <main className="flex-1 relative overflow-hidden flex flex-col">
-        {/* Status / Errors */}
         <div className="absolute top-4 left-1/2 -translate-x-1/2 z-[60] flex flex-col gap-2 w-full max-w-md pointer-events-none px-4">
           {error && <div className="bg-red-600 text-white text-xs font-bold py-3 px-6 rounded-2xl shadow-xl animate-in fade-in slide-in-from-top-4 pointer-events-auto flex items-center justify-between">{error} <button onClick={()=>setError('')}><X size={14}/></button></div>}
-          {statusMessage && <div className="bg-slate-900 text-white text-xs font-bold py-3 px-6 rounded-2xl shadow-xl animate-in fade-in slide-in-from-top-4">{statusMessage}</div>}
+          {statusMessage && <div className="bg-slate-900 text-white text-xs font-bold py-3 px-6 rounded-2xl shadow-xl animate-in fade-in slide-in-from-top-4 flex items-center gap-2">
+            {loading && <RefreshCw size={14} className="animate-spin" />}
+            {statusMessage}
+          </div>}
         </div>
 
-        {/* Timeline Canvas */}
         <div ref={scrollContainerRef} className="flex-1 overflow-x-auto overflow-y-hidden custom-scrollbar snap-x snap-mandatory">
           <div className="h-full inline-flex items-end pb-32 px-[35vw] min-w-full">
             <div className="flex items-end gap-16 relative">
@@ -450,9 +472,6 @@ export default function App() {
         </div>
       </main>
 
-      {/* MODALS */}
-      
-      {/* Event Details Modal */}
       {activeEventDetails && (
         <div className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-6">
           <div className="bg-white rounded-[2.5rem] shadow-2xl max-w-lg w-full p-10 animate-in zoom-in-95">
@@ -484,8 +503,8 @@ export default function App() {
                  </div>
                </div>
                <div className="p-4 bg-slate-50 rounded-2xl">
-                 <p className="text-[10px] text-slate-400 uppercase font-black tracking-widest mb-1">Image URL</p>
-                 <p className="break-all font-mono text-[10px] text-blue-600">{activeEventDetails.imageurl}</p>
+                 <p className="text-[10px] text-slate-400 uppercase font-black tracking-widest mb-1">Image Source</p>
+                 <p className="break-all font-mono text-[10px] text-blue-600">{activeEventDetails.imageurl || 'No image found'}</p>
                </div>
              </div>
              <button onClick={() => setActiveEventDetails(null)} className="mt-8 w-full py-4 bg-slate-900 text-white font-bold rounded-2xl shadow-lg">Close View</button>
@@ -493,7 +512,6 @@ export default function App() {
         </div>
       )}
 
-      {/* New Timeline Modal */}
       {showNewDialog && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-6">
           <div className="bg-white rounded-[2.5rem] shadow-2xl max-w-lg w-full p-10 animate-in zoom-in-95">
@@ -511,7 +529,6 @@ export default function App() {
         </div>
       )}
 
-      {/* Add Events Modal */}
       {showAddDialog && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-blue-900/40 backdrop-blur-sm p-6">
           <div className="bg-white rounded-[2.5rem] shadow-2xl max-w-lg w-full p-10 animate-in zoom-in-95">
@@ -519,7 +536,7 @@ export default function App() {
               <StarIcon size={24} />
             </div>
             <h2 className="text-3xl font-serif font-bold text-slate-900 mb-2">Add Content</h2>
-            <p className="text-slate-500 mb-8 text-sm font-medium">How many new events should the AI research for your <b>{timelineTitle || 'current'}</b> timeline?</p>
+            <p className="text-slate-500 mb-8 text-sm font-medium">How many new events should be researched for <b>{timelineTitle || 'current'}</b>?</p>
             
             <div className="bg-slate-50 p-6 rounded-2xl border border-slate-200 mb-8 flex flex-col items-center gap-4">
               <span className="text-4xl font-black text-slate-900">{numToAdd}</span>
@@ -537,7 +554,6 @@ export default function App() {
         </div>
       )}
 
-      {/* Open Library Modal (Integrated Spreadsheet Import) */}
       {showLibrary && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-6">
           <div className="bg-white rounded-[2.5rem] shadow-2xl max-w-4xl w-full p-10 animate-in zoom-in-95 flex flex-col max-h-[85vh]">
@@ -546,7 +562,6 @@ export default function App() {
               <button onClick={()=>setShowLibrary(false)} className="p-2 hover:bg-slate-100 rounded-full transition-colors"><X size={24}/></button>
             </div>
 
-            {/* Google Sheets Integration inside Library */}
             <div className="mb-8 p-6 bg-green-50 rounded-3xl border border-green-100">
               <div className="flex items-center gap-2 mb-3 text-green-700 font-bold text-sm">
                 <FileSpreadsheet size={18} />
